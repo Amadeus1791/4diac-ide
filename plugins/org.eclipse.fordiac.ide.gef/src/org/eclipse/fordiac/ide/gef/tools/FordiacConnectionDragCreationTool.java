@@ -19,14 +19,22 @@ import org.eclipse.draw2d.geometry.Point;
 import org.eclipse.fordiac.ide.gef.figures.HideableConnection;
 import org.eclipse.fordiac.ide.gef.router.MoveableRouter;
 import org.eclipse.fordiac.ide.model.commands.create.AbstractConnectionCreateCommand;
+import org.eclipse.fordiac.ide.model.libraryElement.Application;
+import org.eclipse.fordiac.ide.model.libraryElement.AutomationSystem;
+import org.eclipse.fordiac.ide.model.libraryElement.FBNetwork;
 import org.eclipse.fordiac.ide.model.libraryElement.IInterfaceElement;
+import org.eclipse.fordiac.ide.model.typelibrary.TypeLibrary;
 import org.eclipse.fordiac.ide.model.ui.editors.AdvancedScrollingGraphicalViewer;
 import org.eclipse.fordiac.ide.ui.UIPlugin;
 import org.eclipse.fordiac.ide.ui.preferences.ConnectionPreferenceValues;
 import org.eclipse.gef.EditPart;
 import org.eclipse.gef.EditPartViewer;
+import org.eclipse.gef.EditPolicy;
+import org.eclipse.gef.GraphicalEditPart;
+import org.eclipse.gef.GraphicalViewer;
 import org.eclipse.gef.commands.Command;
 import org.eclipse.gef.requests.CreateConnectionRequest;
+import org.eclipse.gef.requests.SelectionRequest;
 import org.eclipse.gef.tools.ConnectionDragCreationTool;
 import org.eclipse.swt.SWT;
 import org.eclipse.swt.events.MouseEvent;
@@ -168,14 +176,73 @@ public class FordiacConnectionDragCreationTool extends ConnectionDragCreationToo
 	 */
 	private void handleCanvasDrop() {
 		canvasDropLocation = getLocation().getCopy();
+		System.out.println("Canvas drop detected - source: " + sourceModel);
 
-		// Temporary log for development - will be removed when dialog is implemented
-		System.out.println("Canvas drop detected - source: " + sourceModel); //$NON-NLS-1$
+		// Get the viewer
+		final GraphicalViewer viewer = (GraphicalViewer) getCurrentViewer();
+		if (viewer == null) {
+			return;
+		}
 
-		// TODO: Will be implemented in later commits:
-		// 1. Show element selection dialog
-		// 2. Filter types based on source pin compatibility
-		// 3. Create selected element and auto-connect
+		// Get the FBNetwork edit part (the canvas)
+		final EditPart rootEditPart = viewer.getRootEditPart().getContents();
+		if (rootEditPart == null || !(rootEditPart instanceof final GraphicalEditPart graphicalEditPart)) {
+			return;
+		}
+
+		// Get type library
+		TypeLibrary typeLibrary = getTypeLibraryFromEditPart(graphicalEditPart);
+		if (typeLibrary == null) {
+			System.out.println("ERROR: Could not get type library");
+			return;
+		}
+
+		// Create and show the direct edit manager (same as double-click does)
+		showTypeSelectionUI(graphicalEditPart, typeLibrary);
+	}
+
+	private TypeLibrary getTypeLibraryFromEditPart(final GraphicalEditPart editPart) {
+		final Object model = editPart.getModel();
+		if (model instanceof FBNetwork) {
+			final FBNetwork network = (FBNetwork) model;
+			final AutomationSystem automationSystem = network.getAutomationSystem();
+			if (automationSystem != null) {
+				return automationSystem.getTypeLibrary();
+			}
+			final Application application = network.getApplication();
+			if (application != null && application.getAutomationSystem() != null) {
+				return application.getAutomationSystem().getTypeLibrary();
+			}
+		}
+		return null;
+	}
+
+	private void showTypeSelectionUI(final GraphicalEditPart editPart, final TypeLibrary typeLibrary) {
+		// This is tricky - NewInstanceDirectEditManager is in application plugin
+		// We need to trigger it via the existing EditPolicy mechanism
+
+		// Try to get the policy by role
+		final Object policy = editPart.getEditPolicy(EditPolicy.DIRECT_EDIT_ROLE);
+
+		if (policy != null) {
+			try {
+				// Use reflection to call performDirectEdit
+				final java.lang.reflect.Method method = policy.getClass().getMethod("performDirectEdit",
+						org.eclipse.gef.requests.SelectionRequest.class);
+
+				final SelectionRequest request = new SelectionRequest();
+				request.setLocation(canvasDropLocation.getCopy());
+
+				method.invoke(policy, request);
+				System.out.println("Triggered FORDIAC type selection");
+
+			} catch (Exception e) {
+				System.out.println("ERROR: Could not trigger direct edit: " + e.getMessage());
+				e.printStackTrace();
+			}
+		} else {
+			System.out.println("ERROR: No DIRECT_EDIT_ROLE policy found");
+		}
 	}
 
 	private static void startHover() {
