@@ -19,11 +19,14 @@ import org.eclipse.draw2d.geometry.Point;
 import org.eclipse.fordiac.ide.gef.figures.HideableConnection;
 import org.eclipse.fordiac.ide.gef.router.MoveableRouter;
 import org.eclipse.fordiac.ide.model.commands.create.AbstractConnectionCreateCommand;
+import org.eclipse.fordiac.ide.model.libraryElement.IInterfaceElement;
 import org.eclipse.fordiac.ide.model.ui.editors.AdvancedScrollingGraphicalViewer;
 import org.eclipse.fordiac.ide.ui.UIPlugin;
 import org.eclipse.fordiac.ide.ui.preferences.ConnectionPreferenceValues;
+import org.eclipse.gef.EditPart;
 import org.eclipse.gef.EditPartViewer;
 import org.eclipse.gef.commands.Command;
+import org.eclipse.gef.requests.CreateConnectionRequest;
 import org.eclipse.gef.tools.ConnectionDragCreationTool;
 import org.eclipse.swt.SWT;
 import org.eclipse.swt.events.MouseEvent;
@@ -37,6 +40,11 @@ public class FordiacConnectionDragCreationTool extends ConnectionDragCreationToo
 			1 + MoveableRouter.MIN_CONNECTION_FB_DISTANCE_SCREEN + HideableConnection.BEND_POINT_BEVEL_SIZE, 1,
 			1 + MoveableRouter.MIN_CONNECTION_FB_DISTANCE_SCREEN + HideableConnection.BEND_POINT_BEVEL_SIZE);
 
+	// Fields to support drag-to-create functionality
+	private EditPart sourceEditPart;
+	private Object sourceModel;
+	private Point canvasDropLocation;
+
 	public FordiacConnectionDragCreationTool() {
 		setDefaultCursor(Display.getDefault().getSystemCursor(SWT.CURSOR_CROSS));
 		setDisabledCursor(Display.getDefault().getSystemCursor(SWT.CURSOR_NO));
@@ -45,6 +53,10 @@ public class FordiacConnectionDragCreationTool extends ConnectionDragCreationToo
 	@Override
 	public void deactivate() {
 		stopHover();
+		// Clean up drag-to-create state
+		sourceEditPart = null;
+		sourceModel = null;
+		canvasDropLocation = null;
 		super.deactivate();
 	}
 
@@ -58,6 +70,39 @@ public class FordiacConnectionDragCreationTool extends ConnectionDragCreationToo
 			CanvasHelper.bindToContentPane(me, advViewer, NEW_CONNECTION_CANVAS_BORDER);
 		}
 		super.mouseDrag(me, viewer);
+	}
+
+	@Override
+	protected boolean handleButtonUp(final int button) {
+		if (button == 1 && isDroppedOnCanvas()) {
+			handleCanvasDrop();
+			eraseTargetFeedback();
+			setState(STATE_INITIAL);
+			return true;
+		}
+		return super.handleButtonUp(button);
+	}
+
+	@Override
+	protected boolean handleDragStarted() {
+		super.handleDragStarted();
+		// Capture source after drag has started - at this point GEF has set up the
+		// connection request
+		captureSourceFromRequest();
+		return true;
+	}
+
+	/**
+	 * Capture the source edit part from the connection request. This is called
+	 * after GEF has initialized the connection creation.
+	 */
+	private void captureSourceFromRequest() {
+		if (getTargetRequest() instanceof final CreateConnectionRequest request) {
+			sourceEditPart = request.getSourceEditPart();
+			if (sourceEditPart != null) {
+				sourceModel = sourceEditPart.getModel();
+			}
+		}
 	}
 
 	@Override
@@ -89,6 +134,48 @@ public class FordiacConnectionDragCreationTool extends ConnectionDragCreationToo
 			stopHover();
 		}
 		super.setCurrentCommand(c);
+	}
+
+	/**
+	 * Check if the connection was dropped on empty canvas (not on a valid port).
+	 * This indicates a drag-to-create scenario.
+	 *
+	 * @return true if dropped on canvas, false if dropped on valid connection
+	 *         target
+	 */
+	private boolean isDroppedOnCanvas() {
+		final EditPart target = getTargetEditPart();
+		return sourceEditPart != null && (target == null || !isValidConnectionTarget(target));
+	}
+
+	/**
+	 * Check if the target edit part represents a valid connection endpoint (port).
+	 *
+	 * @param target the target edit part to check
+	 * @return true if target is a valid port for connection
+	 */
+	private boolean isValidConnectionTarget(final EditPart target) {
+		if (target == null || target.getModel() == sourceModel) {
+			return false;
+		}
+		return target.getModel() instanceof IInterfaceElement;
+	}
+
+	/**
+	 * Handle the canvas drop scenario for drag-to-create functionality. Currently
+	 * stores the drop location for future implementation. TODO: Will be enhanced in
+	 * future commits to show element creation dialog.
+	 */
+	private void handleCanvasDrop() {
+		canvasDropLocation = getLocation().getCopy();
+
+		// Temporary log for development - will be removed when dialog is implemented
+		System.out.println("Canvas drop detected - source: " + sourceModel); //$NON-NLS-1$
+
+		// TODO: Will be implemented in later commits:
+		// 1. Show element selection dialog
+		// 2. Filter types based on source pin compatibility
+		// 3. Create selected element and auto-connect
 	}
 
 	private static void startHover() {
