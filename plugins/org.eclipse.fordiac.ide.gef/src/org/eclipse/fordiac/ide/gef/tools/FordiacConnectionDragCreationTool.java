@@ -17,6 +17,7 @@ package org.eclipse.fordiac.ide.gef.tools;
 import java.util.ArrayList;
 import java.util.List;
 
+import org.eclipse.draw2d.Cursors;
 import org.eclipse.draw2d.geometry.Insets;
 import org.eclipse.draw2d.geometry.Point;
 import org.eclipse.emf.common.util.EList;
@@ -53,6 +54,7 @@ import org.eclipse.gef.tools.ConnectionDragCreationTool;
 import org.eclipse.jface.window.Window;
 import org.eclipse.swt.SWT;
 import org.eclipse.swt.events.MouseEvent;
+import org.eclipse.swt.graphics.Cursor;
 import org.eclipse.swt.widgets.Display;
 import org.eclipse.swt.widgets.Shell;
 
@@ -69,6 +71,8 @@ public class FordiacConnectionDragCreationTool extends ConnectionDragCreationToo
 	private Object sourceModel;
 	private Point canvasDropLocation;
 	private org.eclipse.gef.commands.CommandStackEventListener pendingConnectionListener;
+	/** Track whether we're currently over empty canvas for cursor feedback */
+	private boolean isOverEmptyCanvas = false;
 
 	public FordiacConnectionDragCreationTool() {
 		setDefaultCursor(Display.getDefault().getSystemCursor(SWT.CURSOR_CROSS));
@@ -79,6 +83,10 @@ public class FordiacConnectionDragCreationTool extends ConnectionDragCreationToo
 	public void deactivate() {
 		stopHover();
 
+		// Reset cursor feedback state
+		isOverEmptyCanvas = false;
+		// No need to call setCursor() here - calculateCursor() will handle it
+
 		// Clean up drag-to-create state
 		sourceEditPart = null;
 		sourceModel = null;
@@ -86,8 +94,6 @@ public class FordiacConnectionDragCreationTool extends ConnectionDragCreationToo
 
 		// Don't clear PendingConnectionManager here - it needs to survive tool
 		// deactivation
-		// The polling mechanism will handle cleanup after connection creation or
-		// timeout
 
 		super.deactivate();
 	}
@@ -178,22 +184,119 @@ public class FordiacConnectionDragCreationTool extends ConnectionDragCreationToo
 		return super.handleDrag();
 	}
 
+//	@Override
+//	protected boolean handleMove() {
+//		// Continue tracking location during move (similar to drag)
+//		final Point currentLocation = getLocation();
+//
+//		if (sourceModel != null) {
+//			final EditPart targetEP = getTargetEditPart();
+//
+//			if (targetEP == null || targetEP.getModel() instanceof FBNetwork) {
+//				canvasDropLocation = currentLocation.getCopy();
+//			} else {
+//				canvasDropLocation = null;
+//			}
+//		}
+//
+//		return super.handleMove();
+//	}
 	@Override
 	protected boolean handleMove() {
-		// Continue tracking location during move (similar to drag)
-		final Point currentLocation = getLocation();
+		// Let parent handle normal connection creation behavior
+		final boolean result = super.handleMove();
 
-		if (sourceModel != null) {
-			final EditPart targetEP = getTargetEditPart();
+		// If we're dragging from a source pin, track whether we're over empty canvas
+		if (sourceEditPart != null && sourceModel instanceof IInterfaceElement) {
+			final Point location = getLocation();
+			final EditPart targetEditPart = getCurrentViewer().findObjectAt(location);
 
-			if (targetEP == null || targetEP.getModel() instanceof FBNetwork) {
-				canvasDropLocation = currentLocation.getCopy();
-			} else {
-				canvasDropLocation = null;
+			// Update state (calculateCursor will use this)
+			final boolean nowOverEmptyCanvas = isOverEmptyCanvas(targetEditPart);
+
+			if (nowOverEmptyCanvas != isOverEmptyCanvas) {
+				isOverEmptyCanvas = nowOverEmptyCanvas;
+				System.out.println("State change: isOverEmptyCanvas = " + isOverEmptyCanvas);
 			}
 		}
 
-		return super.handleMove();
+		return result;
+	}
+
+	// ============================================================================
+	// STEP 2: ADD calculateCursor() - Return Cursor Based on State
+	// ============================================================================
+
+	/**
+	 * Override cursor calculation to show different cursor based on drag-to-create
+	 * state. This is called by GEF's drag tracker and properly updates the cursor
+	 * during drag operations.
+	 *
+	 * NOTE: During active drag operations, setCursor() doesn't work because the
+	 * drag tracker continuously calls calculateCursor() to determine the cursor. We
+	 * must override this method instead.
+	 */
+	@Override
+	protected Cursor calculateCursor() {
+		// If we're in drag-to-create mode (dragging from source pin)
+		if (sourceEditPart != null && sourceModel instanceof IInterfaceElement) {
+			if (isOverEmptyCanvas) {
+				// Over empty canvas - show crosshair to indicate "create new element" mode
+				System.out.println("calculateCursor: returning CROSS");
+				return Cursors.CROSS;
+			}
+			// Over an element - show connection/drag cursor
+			System.out.println("calculateCursor: returning SIZEALL");
+			return Cursors.SIZEALL; // 4-way arrow (indicates drag/connect)
+			// Alternative options:
+			// return Cursors.ARROW; // Normal arrow
+			// return Cursors.HAND; // Pointing hand
+			// return Cursors.SIZEN; // North arrow
+		}
+
+		// Default behavior when not in drag-to-create mode
+		return super.calculateCursor();
+	}
+
+	/**
+	 * Update cursor to provide visual feedback during drag-to-create mode. Shows
+	 * crosshair when over empty canvas, normal arrow otherwise.
+	 */
+	private void updateCursorFeedback() {
+		final Point location = getLocation();
+		final EditPart targetEditPart = getCurrentViewer().findObjectAt(location);
+
+		// Check if we're over empty canvas (the root network edit part)
+		final boolean nowOverEmptyCanvas = isOverEmptyCanvas(targetEditPart);
+
+		// Only update cursor if state changed (avoid unnecessary redraws)
+		if (nowOverEmptyCanvas != isOverEmptyCanvas) {
+			isOverEmptyCanvas = nowOverEmptyCanvas;
+
+			if (isOverEmptyCanvas) {
+				// Over empty canvas - show crosshair to indicate "create new element" mode
+				setCursor(Cursors.CROSS);
+				System.out.println("Cursor: CROSS (over empty canvas)");
+			} else {
+				// Over an element - show default arrow
+				setCursor(Cursors.ARROW);
+				System.out.println("Cursor: ARROW (over element)");
+			}
+		}
+	}
+
+	/**
+	 * Check if the given EditPart represents empty canvas (i.e., the network
+	 * itself, not a child element like a function block).
+	 */
+	private boolean isOverEmptyCanvas(final EditPart targetEditPart) {
+		if (targetEditPart == null) {
+			return false;
+		}
+
+		// Empty canvas = we hit the FBNetworkEditPart itself
+		final Object model = targetEditPart.getModel();
+		return model instanceof FBNetwork;
 	}
 
 	/**
