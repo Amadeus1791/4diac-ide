@@ -235,26 +235,29 @@ public class FordiacConnectionDragCreationTool extends ConnectionDragCreationToo
 	 * NOTE: During active drag operations, setCursor() doesn't work because the
 	 * drag tracker continuously calls calculateCursor() to determine the cursor. We
 	 * must override this method instead.
+	 *
+	 * * Cursor Mapping: - HAND: Over empty canvas (create new element mode) -
+	 * CROSS: Over compatible port (connect mode - existing FORDIAC behavior) - NO:
+	 * Over invalid target (helpful feedback)
 	 */
 	@Override
 	protected Cursor calculateCursor() {
-		// If we're in drag-to-create mode (dragging from source pin)
+		// If dragging from source pin (drag-to-create mode active)
 		if (sourceEditPart != null && sourceModel instanceof IInterfaceElement) {
-			if (isOverEmptyCanvas) {
-				// Over empty canvas - show crosshair to indicate "create new element" mode
-				System.out.println("calculateCursor: returning CROSS");
-				return Cursors.CROSS;
+			final Point location = getLocation();
+			final EditPart targetEditPart = getCurrentViewer().findObjectAt(location);
+
+			if (isOverEmptyCanvas(targetEditPart)) {
+				// Over empty canvas - show HAND to indicate "create new element"
+				// This distinguishes from CROSS (which users know means "connect to port")
+				return Cursors.HAND;
 			}
-			// Over an element - show connection/drag cursor
-			System.out.println("calculateCursor: returning SIZEALL");
-			return Cursors.SIZEALL; // 4-way arrow (indicates drag/connect)
-			// Alternative options:
-			// return Cursors.ARROW; // Normal arrow
-			// return Cursors.HAND; // Pointing hand
-			// return Cursors.SIZEN; // North arrow
+			// Over an element - let parent handle it
+			// Parent will show CROSS over valid ports, normal cursor elsewhere
+			return super.calculateCursor();
 		}
 
-		// Default behavior when not in drag-to-create mode
+		// Not in drag-to-create mode - use normal behavior
 		return super.calculateCursor();
 	}
 
