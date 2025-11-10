@@ -71,8 +71,6 @@ public class FordiacConnectionDragCreationTool extends ConnectionDragCreationToo
 
 	@Override
 	public void deactivate() {
-		System.out.println("=== DEACTIVATE CALLED ===");
-
 		stopHover();
 
 		// Clean up drag-to-create state
@@ -80,8 +78,10 @@ public class FordiacConnectionDragCreationTool extends ConnectionDragCreationToo
 		sourceModel = null;
 		canvasDropLocation = null;
 
-		// Don't clear PendingConnectionManager here - polling handles cleanup
-		// The manager state needs to survive tool deactivation
+		// Don't clear PendingConnectionManager here - it needs to survive tool
+		// deactivation
+		// The polling mechanism will handle cleanup after connection creation or
+		// timeout
 
 		super.deactivate();
 	}
@@ -100,19 +100,12 @@ public class FordiacConnectionDragCreationTool extends ConnectionDragCreationToo
 
 	@Override
 	protected boolean handleButtonUp(final int button) {
-		System.out.println("=== handleButtonUp START ===");
-		System.out.println("sourceModel: " + sourceModel);
-		System.out.println("canvasDropLocation: " + canvasDropLocation);
-
 		// Check if this is a canvas drop (drag from pin to empty canvas)
 		if (sourceModel != null && canvasDropLocation != null) {
-			System.out.println("Canvas drop detected!");
-
 			// Get viewer and cast to GraphicalViewer
 			final EditPartViewer viewer = getCurrentViewer();
 			if (!(viewer instanceof GraphicalViewer)) {
-				System.out.println("ERROR: Viewer is not GraphicalViewer");
-				// Clean up before returning
+				// Clean up and fall back to normal behavior
 				sourceEditPart = null;
 				sourceModel = null;
 				canvasDropLocation = null;
@@ -130,9 +123,7 @@ public class FordiacConnectionDragCreationTool extends ConnectionDragCreationToo
 			return true;
 		}
 
-		System.out.println("Normal connection handling");
-
-		// Clean up even if not canvas drop
+		// Normal connection handling
 		sourceEditPart = null;
 		sourceModel = null;
 		canvasDropLocation = null;
@@ -142,12 +133,10 @@ public class FordiacConnectionDragCreationTool extends ConnectionDragCreationToo
 
 	@Override
 	protected boolean handleButtonDown(final int button) {
-		// Capture the source of the drag
+		// Capture the source of the drag operation
 		if (getTargetEditPart() != null) {
 			sourceEditPart = getTargetEditPart();
 			sourceModel = sourceEditPart.getModel();
-			System.out.println("=== handleButtonDown ===");
-			System.out.println("Captured source: " + sourceModel);
 		}
 
 		return super.handleButtonDown(button);
@@ -164,7 +153,7 @@ public class FordiacConnectionDragCreationTool extends ConnectionDragCreationToo
 
 	@Override
 	protected boolean handleDrag() {
-		// Track the current drag location
+		// Track the current drag location to detect canvas drops
 		final Point currentLocation = getLocation();
 
 		if (sourceModel != null) {
@@ -172,11 +161,10 @@ public class FordiacConnectionDragCreationTool extends ConnectionDragCreationToo
 			final EditPart targetEP = getTargetEditPart();
 
 			if (targetEP == null || targetEP.getModel() instanceof FBNetwork) {
-				// Dragging over empty canvas or network background
+				// Dragging over empty canvas - potential drag-to-create
 				canvasDropLocation = currentLocation.getCopy();
-				System.out.println("Dragging over canvas at: " + canvasDropLocation);
 			} else {
-				// Dragging over an element - normal connection
+				// Dragging over an element - normal connection behavior
 				canvasDropLocation = null;
 			}
 		}
@@ -186,7 +174,7 @@ public class FordiacConnectionDragCreationTool extends ConnectionDragCreationToo
 
 	@Override
 	protected boolean handleMove() {
-		// Also track during move (similar to drag)
+		// Continue tracking location during move (similar to drag)
 		final Point currentLocation = getLocation();
 
 		if (sourceModel != null) {
@@ -272,74 +260,72 @@ public class FordiacConnectionDragCreationTool extends ConnectionDragCreationToo
 	}
 
 	/**
-	 * Handle the canvas drop scenario for drag-to-create functionality. Currently
-	 * stores the drop location for future implementation. TODO: Will be enhanced in
-	 * future commits to show element creation dialog.
+	 * Handle dropping a connection on empty canvas to trigger drag-to-create.
+	 *
+	 * This initiates the workflow: 1. Store the connection intent 2. Show type
+	 * selection UI 3. Poll for new FB creation 4. Auto-create connection to new FB
+	 *
+	 * @param viewer         the graphical viewer
+	 * @param sourceEditPart the edit part of the source element
+	 * @param sourceModel    the source model (should be IInterfaceElement)
+	 * @param dropLocation   the location where the drop occurred
 	 */
 	private void handleCanvasDrop(final GraphicalViewer viewer, final EditPart sourceEditPart, final Object sourceModel,
 			final Point dropLocation) {
-		System.out.println("=== handleCanvasDrop START ===");
-		System.out.println("Canvas drop detected - source: " + sourceModel);
 
-// Validate source is an interface element (pin)
+		// Validate source is an interface element (pin)
 		if (!(sourceModel instanceof IInterfaceElement)) {
-			System.out.println("ERROR: Source is not an IInterfaceElement");
 			return;
 		}
 
-// Find target edit part at drop location
+		// Find target edit part at drop location
 		final EditPart targetEditPart = viewer.findObjectAt(dropLocation);
 		if (targetEditPart == null) {
-			System.out.println("ERROR: No edit part at drop location");
 			return;
 		}
 
-// Navigate up to find FBNetworkEditPart
+		// Navigate up to find FBNetworkEditPart
 		EditPart graphicalEditPart = targetEditPart;
 		while (graphicalEditPart != null && !(graphicalEditPart.getModel() instanceof FBNetwork)) {
 			graphicalEditPart = graphicalEditPart.getParent();
 		}
 
 		if (graphicalEditPart == null || !(graphicalEditPart.getModel() instanceof FBNetwork)) {
-			System.out.println("ERROR: Root model is not FBNetwork");
 			return;
 		}
 
 		final FBNetwork network = (FBNetwork) graphicalEditPart.getModel();
 
-// Store state in manager (survives tool deactivation)
+		// Store state in manager (survives tool deactivation during type selection)
 		PendingConnectionManager.getInstance().setPending((IInterfaceElement) sourceModel, network);
 
-		System.out.println("State stored in PendingConnectionManager");
-
-// Start polling for new FB
+		// Start polling for new FB creation
 		setupPendingConnectionListener(viewer);
 
-// Trigger type selection (which will create the FB)
-
-		// NEW:
+		// Trigger FORDIAC's type selection UI (which will create the FB)
 		if (graphicalEditPart instanceof GraphicalEditPart) {
 			showTypeSelectionUI((GraphicalEditPart) graphicalEditPart);
-		} else {
-			System.out.println("ERROR: Edit part is not GraphicalEditPart");
 		}
-
-		System.out.println("=== handleCanvasDrop END ===");
 	}
 
+	/**
+	 * Set up polling to detect when a new FB is created, then auto-create the
+	 * connection.
+	 *
+	 * Polls every 100ms for up to 5 seconds to detect element count increase in the
+	 * network.
+	 *
+	 * @param viewer the graphical viewer
+	 */
 	private void setupPendingConnectionListener(final GraphicalViewer viewer) {
-		System.out.println("=== setupPendingConnectionListener START ===");
-
 		final PendingConnectionManager manager = PendingConnectionManager.getInstance();
 
 		if (!manager.hasPending()) {
-			System.out.println("ERROR: No pending connection to monitor");
 			return;
 		}
 
-		// Store the current number of elements
+		// Store the current number of elements before creation
 		final int elementCountBefore = manager.getTargetNetwork().getNetworkElements().size();
-		System.out.println("elementCountBefore: " + elementCountBefore);
 
 		// Wait 200ms before starting to poll (let dialog appear first)
 		Display.getDefault().timerExec(200, new Runnable() {
@@ -348,11 +334,8 @@ public class FordiacConnectionDragCreationTool extends ConnectionDragCreationToo
 
 			@Override
 			public void run() {
-				System.out.println("--- Polling attempt " + (attempts + 1) + " ---");
-
-				// Check if state is still valid
+				// Check if state is still valid (user might have cancelled)
 				if (!manager.hasPending()) {
-					System.out.println("Polling stopped - state cleared (cancelled or completed)");
 					return;
 				}
 
@@ -361,52 +344,46 @@ public class FordiacConnectionDragCreationTool extends ConnectionDragCreationToo
 				final int elementCountAfter = manager.getTargetNetwork().getNetworkElements().size();
 
 				if (elementCountAfter > elementCountBefore) {
-					// New FB was created!
-					System.out.println("Detected new FB after " + attempts + " attempts (count: " + elementCountBefore
-							+ " -> " + elementCountAfter + ")");
+					// New FB was created - create the connection
 					createPendingConnection(viewer);
 				} else if (attempts < MAX_ATTEMPTS) {
 					// Not created yet, check again
 					Display.getDefault().timerExec(100, this);
 				} else {
 					// Timeout - user probably cancelled
-					System.out.println("Timeout waiting for FB creation - cleaning up");
 					manager.clear();
 				}
 			}
 		});
 	}
 
+	/**
+	 * Create the auto-connection from the source pin to a compatible input on the
+	 * newly created FB.
+	 *
+	 * @param viewer the graphical viewer
+	 */
 	private void createPendingConnection(final GraphicalViewer viewer) {
-		System.out.println("=== createPendingConnection START ===");
-
 		final PendingConnectionManager manager = PendingConnectionManager.getInstance();
 
 		if (!manager.hasPending()) {
-			System.out.println("ERROR: No pending connection state");
 			return;
 		}
 
 		final IInterfaceElement sourcePin = manager.getSourcePin();
 		final FBNetwork network = manager.getTargetNetwork();
 
-		System.out.println("Source pin: " + sourcePin.getName());
-		System.out.println("Network elements: " + network.getNetworkElements().size());
-
 		// Find the newly created FB (last element in network)
 		final EList<FBNetworkElement> elements = network.getNetworkElements();
 		if (elements.isEmpty()) {
-			System.out.println("ERROR: No elements in network");
 			manager.clear();
 			return;
 		}
 
 		final FBNetworkElement newElement = elements.get(elements.size() - 1);
-		System.out.println("New element found: " + newElement.getName() + " (type: " + newElement.getTypeName() + ")");
 
-		// Check if it's an FB (has interface) - skip if it's a subapp or other element
+		// Check if it's an FB (has interface)
 		if (!(newElement instanceof final FB newFB)) {
-			System.out.println("ERROR: New element is not an FB, it's: " + newElement.getClass().getSimpleName());
 			manager.clear();
 			return;
 		}
@@ -415,41 +392,37 @@ public class FordiacConnectionDragCreationTool extends ConnectionDragCreationToo
 		IInterfaceElement targetPin = null;
 
 		if (sourcePin.isIsInput()) {
-			System.out.println("ERROR: Source is input pin, expected output pin");
+			// Source is input pin - we expect output pins for drag-to-create
 			manager.clear();
 			return;
 		}
 
 		// Source is output, find compatible input on new FB
 		if (sourcePin instanceof Event) {
-			// Look for event input
+			// Look for first event input
 			for (final Event eventInput : newFB.getInterface().getEventInputs()) {
 				if (isCompatible(sourcePin, eventInput)) {
 					targetPin = eventInput;
-					System.out.println("Found compatible event input: " + eventInput.getName());
 					break;
 				}
 			}
 		} else if (sourcePin instanceof VarDeclaration) {
-			// Look for data input
+			// Look for first compatible data input
 			for (final VarDeclaration dataInput : newFB.getInterface().getInputVars()) {
 				if (isCompatible(sourcePin, dataInput)) {
 					targetPin = dataInput;
-					System.out.println("Found compatible data input: " + dataInput.getName());
 					break;
 				}
 			}
 		}
 
 		if (targetPin == null) {
-			System.out.println("ERROR: No compatible input pin found on new FB");
+			// TODO: Show user-friendly error message
 			manager.clear();
 			return;
 		}
 
 		// Create the connection command
-		System.out.println("Creating connection: " + sourcePin.getName() + " -> " + targetPin.getName());
-
 		final AbstractConnectionCreateCommand connectionCmd;
 		if (sourcePin instanceof Event) {
 			connectionCmd = new EventConnectionCreateCommand(network);
@@ -464,16 +437,10 @@ public class FordiacConnectionDragCreationTool extends ConnectionDragCreationToo
 		final CommandStack commandStack = viewer.getEditDomain().getCommandStack();
 		if (commandStack != null) {
 			commandStack.execute(connectionCmd);
-			System.out
-					.println("SUCCESS: Auto-connection created: " + sourcePin.getName() + " -> " + targetPin.getName());
-		} else {
-			System.out.println("ERROR: CommandStack is null");
 		}
 
 		// Clear state after success or failure
 		manager.clear();
-
-		System.out.println("=== createPendingConnection END ===");
 	}
 
 	private IInterfaceElement findCompatibleInputPin(final FBNetworkElement fb, final IInterfaceElement outputPin) {
@@ -599,7 +566,11 @@ public class FordiacConnectionDragCreationTool extends ConnectionDragCreationToo
 	}
 
 	/**
-	 * Check if source and target pins are compatible for connection
+	 * Check if source and target pins are compatible for connection.
+	 *
+	 * @param source the source interface element
+	 * @param target the target interface element
+	 * @return true if compatible
 	 */
 	private boolean isCompatible(final IInterfaceElement source, final IInterfaceElement target) {
 		// Basic type compatibility check
@@ -609,7 +580,7 @@ public class FordiacConnectionDragCreationTool extends ConnectionDragCreationToo
 
 		if (source instanceof final VarDeclaration sourceVar && target instanceof final VarDeclaration targetVar) {
 			// For data connections, check type compatibility
-			// Simple check - in real implementation, would need proper type checking
+			// Simple check - proper implementation would need full IEC 61499 type checking
 			if (sourceVar.getType() != null && targetVar.getType() != null) {
 				return sourceVar.getType().getName().equals(targetVar.getType().getName());
 			}
