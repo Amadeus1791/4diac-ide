@@ -14,9 +14,13 @@
  *******************************************************************************/
 package org.eclipse.fordiac.ide.gef.tools;
 
+import java.util.ArrayList;
+import java.util.List;
+
 import org.eclipse.draw2d.geometry.Insets;
 import org.eclipse.draw2d.geometry.Point;
 import org.eclipse.emf.common.util.EList;
+import org.eclipse.fordiac.ide.gef.dialogs.PortSelectionDialog;
 import org.eclipse.fordiac.ide.gef.figures.HideableConnection;
 import org.eclipse.fordiac.ide.gef.router.MoveableRouter;
 import org.eclipse.fordiac.ide.model.commands.create.AbstractConnectionCreateCommand;
@@ -46,9 +50,11 @@ import org.eclipse.gef.commands.CommandStack;
 import org.eclipse.gef.requests.CreateConnectionRequest;
 import org.eclipse.gef.requests.SelectionRequest;
 import org.eclipse.gef.tools.ConnectionDragCreationTool;
+import org.eclipse.jface.window.Window;
 import org.eclipse.swt.SWT;
 import org.eclipse.swt.events.MouseEvent;
 import org.eclipse.swt.widgets.Display;
+import org.eclipse.swt.widgets.Shell;
 
 public class FordiacConnectionDragCreationTool extends ConnectionDragCreationTool {
 
@@ -359,7 +365,8 @@ public class FordiacConnectionDragCreationTool extends ConnectionDragCreationToo
 
 	/**
 	 * Create the auto-connection from the source pin to a compatible input on the
-	 * newly created FB.
+	 * newly created FB. Handles multiple compatible ports by showing a selection
+	 * dialog.
 	 *
 	 * @param viewer the graphical viewer
 	 */
@@ -388,38 +395,39 @@ public class FordiacConnectionDragCreationTool extends ConnectionDragCreationToo
 			return;
 		}
 
-		// Find compatible input pin on new FB
-		IInterfaceElement targetPin = null;
-
+		// Validate source pin direction
 		if (sourcePin.isIsInput()) {
 			// Source is input pin - we expect output pins for drag-to-create
 			manager.clear();
 			return;
 		}
 
-		// Source is output, find compatible input on new FB
-		if (sourcePin instanceof Event) {
-			// Look for first event input
-			for (final Event eventInput : newFB.getInterface().getEventInputs()) {
-				if (isCompatible(sourcePin, eventInput)) {
-					targetPin = eventInput;
-					break;
-				}
-			}
-		} else if (sourcePin instanceof VarDeclaration) {
-			// Look for first compatible data input
-			for (final VarDeclaration dataInput : newFB.getInterface().getInputVars()) {
-				if (isCompatible(sourcePin, dataInput)) {
-					targetPin = dataInput;
-					break;
-				}
-			}
-		}
+		// Find all compatible input ports on the new FB
+		final List<IInterfaceElement> compatiblePorts = findCompatiblePorts(newFB, sourcePin);
 
-		if (targetPin == null) {
-			// TODO: Show user-friendly error message
+		// Determine target pin based on number of compatible ports
+		final IInterfaceElement targetPin;
+
+		if (compatiblePorts.isEmpty()) {
+			// E3: No compatible ports found
+			// TODO: Show user-friendly error dialog
 			manager.clear();
 			return;
+
+		}
+		if (compatiblePorts.size() == 1) {
+			// Single compatible port - auto-connect without asking
+			targetPin = compatiblePorts.get(0);
+
+		} else {
+			// E4: Multiple compatible ports - let user choose
+			targetPin = showPortSelectionDialog(viewer, compatiblePorts, newFB.getName());
+
+			if (targetPin == null) {
+				// User cancelled the dialog
+				manager.clear();
+				return;
+			}
 		}
 
 		// Create the connection command
@@ -590,6 +598,57 @@ public class FordiacConnectionDragCreationTool extends ConnectionDragCreationToo
 		}
 
 		return false;
+	}
+
+	/**
+	 * Find all compatible input ports on the target FB for the given source pin.
+	 *
+	 * @param targetFB  the target function block
+	 * @param sourcePin the source interface element (output pin)
+	 * @return list of compatible input ports
+	 */
+	private List<IInterfaceElement> findCompatiblePorts(final FB targetFB, final IInterfaceElement sourcePin) {
+		final List<IInterfaceElement> compatible = new ArrayList<>();
+
+		if (sourcePin instanceof Event) {
+			// Collect all compatible event inputs
+			for (final Event eventInput : targetFB.getInterface().getEventInputs()) {
+				if (isCompatible(sourcePin, eventInput)) {
+					compatible.add(eventInput);
+				}
+			}
+		} else if (sourcePin instanceof VarDeclaration) {
+			// Collect all compatible data inputs
+			for (final VarDeclaration dataInput : targetFB.getInterface().getInputVars()) {
+				if (isCompatible(sourcePin, dataInput)) {
+					compatible.add(dataInput);
+				}
+			}
+		}
+
+		return compatible;
+	}
+
+	/**
+	 * Show a dialog to let the user select which port to connect to when multiple
+	 * compatible ports are available.
+	 *
+	 * @param viewer          the graphical viewer
+	 * @param compatiblePorts list of compatible ports
+	 * @param targetFBName    name of the target FB
+	 * @return the selected port, or null if cancelled
+	 */
+	private IInterfaceElement showPortSelectionDialog(final GraphicalViewer viewer,
+			final List<IInterfaceElement> compatiblePorts, final String targetFBName) {
+
+		final Shell shell = viewer.getControl().getShell();
+		final PortSelectionDialog dialog = new PortSelectionDialog(shell, compatiblePorts, targetFBName);
+
+		if (dialog.open() == Window.OK) {
+			return dialog.getSelectedPort();
+		}
+
+		return null; // User cancelled
 	}
 
 }
