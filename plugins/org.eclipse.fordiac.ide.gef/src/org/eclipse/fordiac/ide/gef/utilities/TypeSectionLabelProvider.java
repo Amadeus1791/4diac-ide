@@ -17,11 +17,14 @@ import org.eclipse.jface.viewers.StyledString;
 import org.eclipse.swt.SWT;
 import org.eclipse.swt.graphics.Font;
 import org.eclipse.swt.graphics.FontData;
+import org.eclipse.swt.graphics.Image;
 import org.eclipse.swt.widgets.Display;
+import org.eclipse.ui.ISharedImages;
+import org.eclipse.ui.PlatformUI;
 
 /**
- * Label provider for the structured type selection tree.
- * Handles both section headers and type entries.
+ * Label provider for the structured type selection tree. Handles both section
+ * headers and type entries.
  */
 public class TypeSectionLabelProvider extends LabelProvider implements IStyledLabelProvider {
 
@@ -47,21 +50,47 @@ public class TypeSectionLabelProvider extends LabelProvider implements IStyledLa
 
 	@Override
 	public StyledString getStyledText(final Object element) {
-		if (element instanceof TypeSection) {
-			final TypeSection section = (TypeSection) element;
-			
+		if (element instanceof final TypeSection section) {
 			// Use display name with count
 			final String displayName = section.getDisplayName();
-			
+
 			// Make section headers bold and gray
-			final StyledString styledString = new StyledString(displayName, 
-					StyledString.QUALIFIER_STYLER);
+			final StyledString styledString = new StyledString(displayName, StyledString.QUALIFIER_STYLER);
 			return styledString;
-		} else if (element instanceof TypeEntry) {
+		}
+		if (element instanceof TypeEntry) {
 			// Delegate to the existing type entry label provider
 			return typeEntryLabelProvider.getStyledText(element);
 		}
 		return new StyledString(element.toString());
+	}
+
+	@Override
+	public Image getImage(final Object element) {
+		if (element instanceof TypeSection) {
+			return getSectionIcon((TypeSection) element);
+		}
+		if (element instanceof TypeEntry) {
+			// Delegate to existing type entry label provider
+			return typeEntryLabelProvider.getImage(element);
+		}
+		return null;
+	}
+
+	private Image getSectionIcon(final TypeSection section) {
+		final ISharedImages sharedImages = PlatformUI.getWorkbench().getSharedImages();
+
+		return switch (section.getName()) {
+		case "Recent" -> //$NON-NLS-1$
+			/* History/Clock icon */ sharedImages.getImage(ISharedImages.IMG_TOOL_UNDO);
+		case "Favorites" -> //$NON-NLS-1$
+			/* Bookmark icon */ sharedImages.getImage(ISharedImages.IMG_OBJS_BKMRK_TSK);
+		case "Frequent" -> //$NON-NLS-1$
+			/* Info icon */ sharedImages.getImage(ISharedImages.IMG_OBJS_INFO_TSK);
+		case "All Categories" -> //$NON-NLS-1$
+			/* Folder icon */ sharedImages.getImage(ISharedImages.IMG_OBJ_FOLDER);
+		default -> null;
+		};
 	}
 
 	@Override
