@@ -20,6 +20,7 @@ import java.util.List;
 import org.eclipse.core.resources.IProject;
 import org.eclipse.fordiac.ide.gef.Messages;
 import org.eclipse.fordiac.ide.gef.utilities.CellEditorLayoutFactory;
+import org.eclipse.fordiac.ide.gef.utilities.FavoritesManager;
 import org.eclipse.fordiac.ide.gef.utilities.MostRecentlyUsedTracker;
 import org.eclipse.fordiac.ide.model.edit.providers.ResultListLabelProvider;
 import org.eclipse.fordiac.ide.model.typelibrary.PaletteFilter;
@@ -64,6 +65,7 @@ public class NewInstanceCellEditor extends TextCellEditor {
 	private TypeEntry selectedEntry = null;
 	protected Text textControl;
 	private MostRecentlyUsedTracker mruTracker;
+	private FavoritesManager favoritesManager;
 
 	private ResultListLabelProvider resultListLabelProvider;
 
@@ -103,10 +105,66 @@ public class NewInstanceCellEditor extends TextCellEditor {
 			}
 		}
 
+		// Initialize Favorites manager (instance-scoped, shared across projects)
+//		if (favoritesManager == null) {
+//			try {
+//				favoritesManager = new FavoritesManager();
+//			} catch (final Exception e) {
+//				System.err.println("Failed to initialize FavoritesManager: " + e.getMessage());
+//				e.printStackTrace();
+//			}
+//		}
+
+		// Initialize Favorites manager (instance-scoped, shared across projects)
+		if (favoritesManager == null) {
+			try {
+				favoritesManager = new FavoritesManager();
+
+				// ===== TEMPORARY TEST CODE - REMOVE AFTER TESTING =====
+				System.out.println("[FavoritesManager] Initialized successfully");
+				System.out
+						.println("[FavoritesManager] Current favorites count: " + favoritesManager.getFavoriteCount());
+
+				// Test adding favorites
+				System.out.println("[FavoritesManager] Testing add operations...");
+				final boolean added1 = favoritesManager.addFavorite("E_CYCLE");
+				final boolean added2 = favoritesManager.addFavorite("E_SWITCH");
+				final boolean added3 = favoritesManager.addFavorite("E_CTU");
+
+				System.out.println("[FavoritesManager] Added E_CYCLE: " + added1);
+				System.out.println("[FavoritesManager] Added E_SWITCH: " + added2);
+				System.out.println("[FavoritesManager] Added E_CTU: " + added3);
+				System.out.println(
+						"[FavoritesManager] Total favorites after adds: " + favoritesManager.getFavoriteCount());
+
+				// Test checking favorites
+				System.out.println("[FavoritesManager] Is E_CYCLE favorite? " + favoritesManager.isFavorite("E_CYCLE"));
+				System.out.println("[FavoritesManager] Is E_SR favorite? " + favoritesManager.isFavorite("E_SR"));
+
+				// Print all favorites
+				System.out.println("[FavoritesManager] All favorites: " + favoritesManager.getFavorites());
+
+				// Test remove (optional - comment out if you want favorites to persist)
+				// boolean removed = favoritesManager.removeFavorite("E_SWITCH");
+				// System.out.println("[FavoritesManager] Removed E_SWITCH: " + removed);
+				// System.out.println("[FavoritesManager] Count after remove: " +
+				// favoritesManager.getFavoriteCount());
+				// ===== END TEST CODE =====
+
+			} catch (final Exception e) {
+				System.err.println("Failed to initialize FavoritesManager: " + e.getMessage());
+				e.printStackTrace();
+			}
+		}
+
 		// Trigger update now that paletteFilter is initialized
 		if (textControl != null && !textControl.isDisposed()) {
 			updateSelectionList();
 		}
+	}
+
+	public FavoritesManager getFavoritesManager() {
+		return favoritesManager;
 	}
 
 	@Override
