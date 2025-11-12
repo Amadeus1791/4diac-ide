@@ -436,7 +436,8 @@ public class NewInstanceCellEditor extends TextCellEditor {
 				final IStructuredSelection selection = treeViewer.getStructuredSelection();
 				if (!selection.isEmpty() && selection.getFirstElement() instanceof TypeEntry) {
 					selectedEntry = (TypeEntry) selection.getFirstElement();
-					textControl.setText(selectedEntry.getTypeName());
+					textControl.setText(selectedEntry.getTypeName()); // ← Add if missing
+					fireApplyEditorValue(); // ← This should be here
 				}
 			} else {
 				event.doit = false;
@@ -558,13 +559,32 @@ public class NewInstanceCellEditor extends TextCellEditor {
 			}
 		});
 
+		// Improved selection listener - handles both mouse and keyboard
 		treeViewer.addSelectionChangedListener(event -> {
-			if (!blockTreeSelection) {
-				final IStructuredSelection selection = treeViewer.getStructuredSelection();
-				if (!selection.isEmpty() && selection.getFirstElement() instanceof TypeEntry) {
-					selectedEntry = (TypeEntry) selection.getFirstElement();
-					fireApplyEditorValue();
-				}
+			// Ignore selections during programmatic tree manipulation
+			if (blockTreeSelection) {
+				return;
+			}
+
+			final Object selected = event.getStructuredSelection().getFirstElement();
+
+			// Only accept TypeEntry selections, ignore section headers
+			if (selected instanceof TypeEntry) {
+				selectedEntry = (TypeEntry) selected;
+
+				// Update the text control with selected type name
+				textControl.setText(selectedEntry.getTypeName());
+
+				// Note: We don't call fireApplyEditorValue() here
+				// Element creation happens on Enter key or double-click
+			}
+			// Section headers are simply ignored - clicking them does nothing
+		});
+
+		// Handle double-click for immediate element creation
+		treeViewer.getTree().addListener(SWT.MouseDoubleClick, event -> {
+			if (selectedEntry != null) {
+				fireApplyEditorValue();
 			}
 		});
 	}
