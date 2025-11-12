@@ -246,7 +246,7 @@ public class NewInstanceCellEditor extends TextCellEditor {
 					screenPos = getParent().toDisplay(getLocation());
 				}
 				final Rectangle compositeBounds = getBounds();
-				popupShell.setBounds(screenPos.x, screenPos.y + compositeBounds.height, compositeBounds.width, 300);
+				popupShell.setBounds(screenPos.x, screenPos.y + compositeBounds.height, compositeBounds.width, 600);
 				if (!popupShell.isVisible()) {
 					popupShell.setVisible(true);
 				}
@@ -745,9 +745,15 @@ public class NewInstanceCellEditor extends TextCellEditor {
 	}
 
 	/**
-	 * Creates the "All Categories" section matching the palette structure. Shows
-	 * only the leaf-level package folders (e.g., "convert", "core", "events")
-	 * without the parent hierarchy (e.g., no "eclipse4diac" parent).
+	 * Creates the "All Categories" section matching the palette structure.
+	 * Organizes types into a 2-level hierarchy: - Standard Libraries (parent) -
+	 * convert, core, events, iec61131-3, io, net, powerlink, etc. (children) - out
+	 * (if exists)
+	 *
+	 * Package naming rules (matching palette): - eclipse4diac::xxx -> Standard
+	 * Libraries > xxx - iec61131::xxx -> Standard Libraries > iec61131-3 > xxx -
+	 * iec61499::xxx -> Standard Libraries > xxx (treated same as eclipse4diac) -
+	 * xxx (no prefix) -> xxx (top level, e.g., "out")
 	 */
 	private TypeSection createAllCategoriesSection() {
 		final TypeSection allCategories = new TypeSection("All Categories");
@@ -761,42 +767,160 @@ public class NewInstanceCellEditor extends TextCellEditor {
 			return allCategories;
 		}
 
-		// Group types by their LEAF package (last part of the package path)
-		// e.g., "eclipse4diac::convert" -> "convert"
-		// "eclipse4diac::io::ads" -> "ads"
-		// "iec61131::events" -> "events"
-		final Map<String, List<TypeEntry>> leafPackageMap = new TreeMap<>();
+		// Create the "Standard Libraries" parent section
+		final TypeSection standardLibraries = new TypeSection("Standard Libraries");
+
+		// Map to hold categories under Standard Libraries
+		// Key: category name (e.g., "convert", "core", "events")
+		// Value: Map of subcategories to their type lists
+		final Map<String, Map<String, List<TypeEntry>>> standardLibsCategories = new TreeMap<>();
+
+		// Map for other top-level categories (e.g., "out")
+		final Map<String, Map<String, List<TypeEntry>>> otherCategories = new TreeMap<>();
 
 		for (final FBTypeEntry entry : typeLib.getFbTypes()) {
 			final String fullPackageName = PackageNameHelper.extractPackageName(entry.getFullTypeName());
 
 			if (fullPackageName == null || fullPackageName.isEmpty()) {
-				// No package - add to a special "root" section
-				leafPackageMap.computeIfAbsent("(no package)", k -> new ArrayList<>()).add(entry);
+				// No package - add to a special "(no package)" section at top level
+				otherCategories.computeIfAbsent("(no package)", k -> new TreeMap<>())
+						.computeIfAbsent("", k -> new ArrayList<>()).add(entry);
 				continue;
 			}
 
-			// Get the LAST part of the package (the leaf folder)
-			// "eclipse4diac::convert" -> "convert"
-			// "eclipse4diac::io::ads" -> "ads"
 			final String[] parts = fullPackageName.split(PackageNameHelper.PACKAGE_NAME_DELIMITER);
-			final String leafPackage = parts[parts.length - 1];
 
-			leafPackageMap.computeIfAbsent(leafPackage, k -> new ArrayList<>()).add(entry);
+			// Determine the target category structure
+			// Handle packages that should go under Standard Libraries
+			if (parts[0].equals("eclipse4diac") || parts[0].equals("iec61131") || parts[0].equals("iec61499")
+					|| parts[0].equals("powerlink")) {
+				String mainCategory;
+				String subCategory;
+
+				if (parts[0].equals("eclipse4diac")) {
+					// eclipse4diac::xxx -> Standard Libraries > xxx
+					// eclipse4diac::io::ads -> Standard Libraries > io > ads
+					if (parts.length < 2) {
+						continue; // Skip malformed package
+					}
+					mainCategory = parts[1]; // e.g., "convert", "io", "events"
+					subCategory = parts.length > 2
+							? String.join("/", java.util.Arrays.copyOfRange(parts, 2, parts.length))
+							: "";
+				} else if (parts[0].equals("iec61131")) {
+					// iec61131::xxx -> Standard Libraries > iec61131-3 > xxx
+					// iec61131::events::E_CYCLE -> Standard Libraries > iec61131-3 > events >
+					// E_CYCLE
+					mainCategory = "iec61131-3";
+					subCategory = parts.length > 1
+							? String.join("/", java.util.Arrays.copyOfRange(parts, 1, parts.length))
+							: "";
+				} else if (parts[0].equals("powerlink")) {
+					// powerlink::xxx -> Standard Libraries > powerlink > xxx
+					mainCategory = "powerlink";
+					subCategory = parts.length > 1
+							? String.join("/", java.util.Arrays.copyOfRange(parts, 1, parts.length))
+							: "";
+				} else // iec61499::xxx -> Standard Libraries > xxx (treat same as eclipse4diac)
+				// The palette treats iec61499 packages the same as eclipse4diac packages
+				if (parts.length >= 2) {
+					mainCategory = parts[1]; // e.g., "events", "net"
+					subCategory = parts.length > 2
+							? String.join("/", java.util.Arrays.copyOfRange(parts, 2, parts.length))
+							: "";
+				} else {
+					continue; // Skip malformed package
+				}
+
+				standardLibsCategories.computeIfAbsent(mainCategory, k -> new TreeMap<>())
+						.computeIfAbsent(subCategory, k -> new ArrayList<>()).add(entry);
+			} else {
+				// Other packages (e.g., "out") -> top level
+				final String mainCategory = parts[0];
+				final String subCategory = parts.length > 1
+						? String.join("/", java.util.Arrays.copyOfRange(parts, 1, parts.length))
+						: "";
+
+				otherCategories.computeIfAbsent(mainCategory, k -> new TreeMap<>())
+						.computeIfAbsent(subCategory, k -> new ArrayList<>()).add(entry);
+			}
 		}
 
-		// Create a section for each leaf package (already sorted alphabetically by
-		// TreeMap)
-		for (final Map.Entry<String, List<TypeEntry>> entry : leafPackageMap.entrySet()) {
-			final String packageName = entry.getKey();
-			final List<TypeEntry> packageTypes = entry.getValue();
+		// Build Standard Libraries hierarchy
+		for (final Map.Entry<String, Map<String, List<TypeEntry>>> categoryEntry : standardLibsCategories.entrySet()) {
+			final String categoryName = categoryEntry.getKey();
+			final Map<String, List<TypeEntry>> subCategories = categoryEntry.getValue();
 
-			// Sort types within each package
-			packageTypes.sort(Comparator.comparing(TypeEntry::getTypeName));
+			final TypeSection categorySection = new TypeSection(categoryName);
 
-			// Create section with types
-			final TypeSection packageSection = new TypeSection(packageName, packageTypes);
-			allCategories.addChildSection(packageSection);
+			if (subCategories.size() == 1 && subCategories.containsKey("")) {
+				// No subcategories - add types directly to this category
+				final List<TypeEntry> types = subCategories.get("");
+				types.sort(Comparator.comparing(TypeEntry::getTypeName));
+				for (final TypeEntry type : types) {
+					categorySection.addEntry(type);
+				}
+			} else {
+				// Has subcategories - create nested structure
+				for (final Map.Entry<String, List<TypeEntry>> subEntry : subCategories.entrySet()) {
+					final String subCategoryName = subEntry.getKey();
+					final List<TypeEntry> types = subEntry.getValue();
+					types.sort(Comparator.comparing(TypeEntry::getTypeName));
+
+					if (subCategoryName.isEmpty()) {
+						// Types directly in this category (no subcategory)
+						for (final TypeEntry type : types) {
+							categorySection.addEntry(type);
+						}
+					} else {
+						// Create subcategory section
+						final TypeSection subCategorySection = new TypeSection(subCategoryName, types);
+						categorySection.addChildSection(subCategorySection);
+					}
+				}
+			}
+
+			standardLibraries.addChildSection(categorySection);
+		}
+
+		// Add Standard Libraries to root if it has content
+		if (standardLibraries.hasChildren()) {
+			allCategories.addChildSection(standardLibraries);
+		}
+
+		// Build other top-level categories (e.g., "out")
+		for (final Map.Entry<String, Map<String, List<TypeEntry>>> categoryEntry : otherCategories.entrySet()) {
+			final String categoryName = categoryEntry.getKey();
+			final Map<String, List<TypeEntry>> subCategories = categoryEntry.getValue();
+
+			final TypeSection categorySection = new TypeSection(categoryName);
+
+			if (subCategories.size() == 1 && subCategories.containsKey("")) {
+				// No subcategories - add types directly
+				final List<TypeEntry> types = subCategories.get("");
+				types.sort(Comparator.comparing(TypeEntry::getTypeName));
+				for (final TypeEntry type : types) {
+					categorySection.addEntry(type);
+				}
+			} else {
+				// Has subcategories
+				for (final Map.Entry<String, List<TypeEntry>> subEntry : subCategories.entrySet()) {
+					final String subCategoryName = subEntry.getKey();
+					final List<TypeEntry> types = subEntry.getValue();
+					types.sort(Comparator.comparing(TypeEntry::getTypeName));
+
+					if (subCategoryName.isEmpty()) {
+						for (final TypeEntry type : types) {
+							categorySection.addEntry(type);
+						}
+					} else {
+						final TypeSection subCategorySection = new TypeSection(subCategoryName, types);
+						categorySection.addChildSection(subCategorySection);
+					}
+				}
+			}
+
+			allCategories.addChildSection(categorySection);
 		}
 
 		return allCategories;
