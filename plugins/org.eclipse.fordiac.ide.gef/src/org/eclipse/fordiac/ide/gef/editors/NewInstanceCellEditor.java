@@ -31,6 +31,8 @@ import org.eclipse.fordiac.ide.model.typelibrary.PaletteFilter;
 import org.eclipse.fordiac.ide.model.typelibrary.TypeEntry;
 import org.eclipse.fordiac.ide.model.typelibrary.TypeLibrary;
 import org.eclipse.fordiac.ide.ui.imageprovider.FordiacImage;
+import org.eclipse.jface.action.Action;
+import org.eclipse.jface.action.MenuManager;
 import org.eclipse.jface.viewers.ColumnViewerToolTipSupport;
 import org.eclipse.jface.viewers.ColumnWeightData;
 import org.eclipse.jface.viewers.DelegatingStyledCellLabelProvider;
@@ -49,6 +51,7 @@ import org.eclipse.swt.widgets.Button;
 import org.eclipse.swt.widgets.Composite;
 import org.eclipse.swt.widgets.Control;
 import org.eclipse.swt.widgets.Event;
+import org.eclipse.swt.widgets.Menu;
 import org.eclipse.swt.widgets.Shell;
 import org.eclipse.swt.widgets.Text;
 
@@ -534,6 +537,126 @@ public class NewInstanceCellEditor extends TextCellEditor {
 		}
 	}
 
+	/**
+	 * Add context menu to tree viewer for favorites management
+	 */
+	private void addContextMenu(final TreeViewer viewer) {
+		final MenuManager menuManager = new MenuManager();
+
+		// Action: Add to Favorites
+		final Action addToFavoritesAction = new Action("Add to Favorites") { //$NON-NLS-1$
+			@Override
+			public void run() {
+				final IStructuredSelection selection = viewer.getStructuredSelection();
+				final Object selected = selection.getFirstElement();
+
+				if (selected instanceof final TypeEntry entry) {
+					final String typeName = entry.getTypeName();
+
+					if (favoritesManager != null) {
+						try {
+							favoritesManager.addFavorite(typeName);
+							refreshPopup(); // Refresh to show updated Favorites section
+						} catch (final Exception e) {
+							System.err.println("Failed to add favorite: " + e.getMessage()); //$NON-NLS-1$
+						}
+					}
+				}
+			}
+
+			@Override
+			public boolean isEnabled() {
+				final Object selected = viewer.getStructuredSelection().getFirstElement();
+
+				// Only enable for TypeEntry (not sections)
+				if (!(selected instanceof final TypeEntry entry)) {
+					return false;
+				}
+
+				final String typeName = entry.getTypeName();
+
+				// Only enable if NOT already favorited
+				if (favoritesManager != null) {
+					return !favoritesManager.isFavorite(typeName);
+				}
+
+				return false;
+			}
+		};
+
+		// Action: Remove from Favorites
+		final Action removeFromFavoritesAction = new Action("Remove from Favorites") { //$NON-NLS-1$
+			@Override
+			public void run() {
+				final IStructuredSelection selection = viewer.getStructuredSelection();
+				final Object selected = selection.getFirstElement();
+
+				if (selected instanceof final TypeEntry entry) {
+					final String typeName = entry.getTypeName();
+
+					if (favoritesManager != null) {
+						try {
+							favoritesManager.removeFavorite(typeName);
+							refreshPopup(); // Refresh to show updated Favorites section
+						} catch (final Exception e) {
+							System.err.println("Failed to remove favorite: " + e.getMessage()); //$NON-NLS-1$
+						}
+					}
+				}
+			}
+
+			@Override
+			public boolean isEnabled() {
+				final Object selected = viewer.getStructuredSelection().getFirstElement();
+
+				// Only enable for TypeEntry (not sections)
+				if (!(selected instanceof final TypeEntry entry)) {
+					return false;
+				}
+
+				final String typeName = entry.getTypeName();
+
+				// Only enable if already favorited
+				if (favoritesManager != null) {
+					return favoritesManager.isFavorite(typeName);
+				}
+
+				return false;
+			}
+		};
+
+		// Add actions to menu
+		menuManager.add(addToFavoritesAction);
+		menuManager.add(removeFromFavoritesAction);
+
+		// Create and set the context menu
+		final Menu menu = menuManager.createContextMenu(viewer.getTree());
+		viewer.getTree().setMenu(menu);
+	}
+
+	/**
+	 * Refresh the popup to show updated sections after favorites change
+	 */
+	private void refreshPopup() {
+		if (textControl == null || textControl.isDisposed()) {
+			return;
+		}
+
+		// Get current search text
+		final String searchText = textControl.getText();
+
+		// Update the selection list (this rebuilds all sections)
+		updateSelectionList();
+
+		// If search was empty, we're in sectioned view - restore selection if possible
+		if (searchText.isEmpty() && selectedEntry != null) {
+			// Try to reselect the previously selected entry
+			blockTreeSelection = true;
+			treeViewer.setSelection(new StructuredSelection(selectedEntry), true);
+			blockTreeSelection = false;
+		}
+	}
+
 	private void createPopUpList(final Composite container) {
 		popupShell = new Shell(container.getShell(), SWT.ON_TOP | SWT.NO_FOCUS | SWT.NO_TRIM);
 		popupShell.setLayout(new FillLayout());
@@ -587,6 +710,10 @@ public class NewInstanceCellEditor extends TextCellEditor {
 				fireApplyEditorValue();
 			}
 		});
+		// ═══════════════════════════════════════════════════════════════
+		// NEW: Add context menu for favorites management
+		// ═══════════════════════════════════════════════════════════════
+		addContextMenu(treeViewer);
 	}
 
 	private void createTypeMenuButton(final Composite container) {
