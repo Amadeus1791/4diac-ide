@@ -99,4 +99,8 @@ public class PaletteFilter {
 		}
 		return Stream.of(exact, right, rest).flatMap(Collection::stream);
 	}
+
+	public TypeLibrary getTypeLibrary() {
+		return typeLib;
+	}
 }

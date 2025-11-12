@@ -15,7 +15,10 @@
 package org.eclipse.fordiac.ide.gef.editors;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
 
 import org.eclipse.core.resources.IProject;
 import org.eclipse.fordiac.ide.gef.Messages;
@@ -27,6 +30,8 @@ import org.eclipse.fordiac.ide.gef.utilities.TypeSection;
 import org.eclipse.fordiac.ide.gef.utilities.TypeSectionContentProvider;
 import org.eclipse.fordiac.ide.gef.utilities.TypeSectionLabelProvider;
 import org.eclipse.fordiac.ide.model.edit.providers.ResultListLabelProvider;
+import org.eclipse.fordiac.ide.model.helpers.PackageNameHelper;
+import org.eclipse.fordiac.ide.model.typelibrary.FBTypeEntry;
 import org.eclipse.fordiac.ide.model.typelibrary.PaletteFilter;
 import org.eclipse.fordiac.ide.model.typelibrary.TypeEntry;
 import org.eclipse.fordiac.ide.model.typelibrary.TypeLibrary;
@@ -295,7 +300,7 @@ public class NewInstanceCellEditor extends TextCellEditor {
 	}
 
 	/**
-	 * Show the sectioned view with Recent, Favorites, and Frequent sections
+	 * Show the sectioned view with Recent, Favorites, Frequent, and All Categories
 	 */
 	private void showSectionedView() {
 		if (paletteFilter == null) {
@@ -323,10 +328,17 @@ public class NewInstanceCellEditor extends TextCellEditor {
 			sections.add(frequentSection);
 		}
 
+		// Create All Categories section
+		final TypeSection allCategoriesSection = createAllCategoriesSection();
+		sections.add(allCategoriesSection); // Always add, even if empty
+
 		if (!sections.isEmpty()) {
 			typeSectionLabelProvider.setSearchString(""); //$NON-NLS-1$
 			treeViewer.setInput(sections);
-			treeViewer.expandAll();
+
+			// Expand Recent, Favorites, Frequent but NOT All Categories
+			treeViewer.setExpandedElements(recentSection, favoritesSection, frequentSection);
+
 			selectFirstTypeEntry();
 		} else {
 			treeViewer.setInput(null);
@@ -446,32 +458,46 @@ public class NewInstanceCellEditor extends TextCellEditor {
 				event.doit = false;
 			}
 			break;
+		case SWT.ARROW_RIGHT:
+			// Expand selected section if it's collapsed
+			final org.eclipse.swt.widgets.TreeItem[] selectionRight = treeViewer.getTree().getSelection();
+			if (selectionRight.length > 0) {
+				final org.eclipse.swt.widgets.TreeItem item = selectionRight[0];
+				if (!item.getExpanded() && item.getItemCount() > 0) {
+					treeViewer.setExpandedState(item.getData(), true);
+					event.doit = false;
+				}
+			}
+			break;
+		case SWT.ARROW_LEFT:
+			// Collapse selected section if it's expanded
+			final org.eclipse.swt.widgets.TreeItem[] selectionLeft = treeViewer.getTree().getSelection();
+			if (selectionLeft.length > 0) {
+				final org.eclipse.swt.widgets.TreeItem item = selectionLeft[0];
+				if (item.getExpanded()) {
+					treeViewer.setExpandedState(item.getData(), false);
+					event.doit = false;
+				}
+			}
+			break;
 		default:
 			break;
 		}
 	}
 
 	/**
-	 * Navigate through tree items, skipping section headers
+	 * Navigate through tree items, including section headers
 	 */
 	private void navigateTree(final boolean down) {
 		if (treeViewer.getTree().getItemCount() == 0) {
 			return;
 		}
 
-		// Get all visible tree items in order
+		// Get all visible tree items in order (including section headers)
 		final List<org.eclipse.swt.widgets.TreeItem> visibleItems = new ArrayList<>();
 		collectVisibleItems(treeViewer.getTree(), visibleItems);
 
-		// Filter to only TypeEntry items (skip section headers)
-		final List<org.eclipse.swt.widgets.TreeItem> entryItems = new ArrayList<>();
-		for (final org.eclipse.swt.widgets.TreeItem item : visibleItems) {
-			if (item.getData() instanceof TypeEntry) {
-				entryItems.add(item);
-			}
-		}
-
-		if (entryItems.isEmpty()) {
+		if (visibleItems.isEmpty()) {
 			return;
 		}
 
@@ -485,36 +511,40 @@ public class NewInstanceCellEditor extends TextCellEditor {
 			final org.eclipse.swt.widgets.TreeItem currentItem = selection[0];
 
 			// Find by identity
-			for (int i = 0; i < entryItems.size(); i++) {
-				if (entryItems.get(i) == currentItem) {
+			for (int i = 0; i < visibleItems.size(); i++) {
+				if (visibleItems.get(i) == currentItem) {
 					currentIndex = i;
 					break;
 				}
 			}
 		}
 
-		// Calculate next index
+		// Calculate next index (no wrapping - stop at boundaries)
 		int nextIndex;
 		if (currentIndex == -1) {
 			nextIndex = 0;
 		} else if (down) {
-			nextIndex = (currentIndex + 1) % entryItems.size();
+			nextIndex = currentIndex + 1;
+			if (nextIndex >= visibleItems.size()) {
+				nextIndex = visibleItems.size() - 1; // Stay at last item
+			}
 		} else {
 			nextIndex = currentIndex - 1;
 			if (nextIndex < 0) {
-				nextIndex = entryItems.size() - 1;
+				nextIndex = 0; // Stay at first item
 			}
 		}
 
-		// CRITICAL: Select directly on tree widget, not through viewer
-		final org.eclipse.swt.widgets.TreeItem nextItem = entryItems.get(nextIndex);
+		// Select the next item DIRECTLY on the tree widget
+		final org.eclipse.swt.widgets.TreeItem nextItem = visibleItems.get(nextIndex);
 		treeViewer.getTree().setSelection(nextItem);
 		treeViewer.getTree().showItem(nextItem);
 
-		// Update the internal selection field
+		// Update the selectedEntry field only if it's a TypeEntry
 		if (nextItem.getData() instanceof TypeEntry) {
 			selectedEntry = (TypeEntry) nextItem.getData();
 		}
+		// else: Selected a section header - don't update selectedEntry
 
 		blockTreeSelection = false;
 	}
@@ -713,4 +743,63 @@ public class NewInstanceCellEditor extends TextCellEditor {
 		menuButton = new Button(container, SWT.FLAT);
 		menuButton.setImage(FordiacImage.ICON_TYPE_NAVIGATOR.getImage());
 	}
+
+	/**
+	 * Creates the "All Categories" section matching the palette structure. Shows
+	 * only the leaf-level package folders (e.g., "convert", "core", "events")
+	 * without the parent hierarchy (e.g., no "eclipse4diac" parent).
+	 */
+	private TypeSection createAllCategoriesSection() {
+		final TypeSection allCategories = new TypeSection("All Categories");
+
+		if (paletteFilter == null) {
+			return allCategories;
+		}
+
+		final TypeLibrary typeLib = paletteFilter.getTypeLibrary();
+		if (typeLib == null) {
+			return allCategories;
+		}
+
+		// Group types by their LEAF package (last part of the package path)
+		// e.g., "eclipse4diac::convert" -> "convert"
+		// "eclipse4diac::io::ads" -> "ads"
+		// "iec61131::events" -> "events"
+		final Map<String, List<TypeEntry>> leafPackageMap = new TreeMap<>();
+
+		for (final FBTypeEntry entry : typeLib.getFbTypes()) {
+			final String fullPackageName = PackageNameHelper.extractPackageName(entry.getFullTypeName());
+
+			if (fullPackageName == null || fullPackageName.isEmpty()) {
+				// No package - add to a special "root" section
+				leafPackageMap.computeIfAbsent("(no package)", k -> new ArrayList<>()).add(entry);
+				continue;
+			}
+
+			// Get the LAST part of the package (the leaf folder)
+			// "eclipse4diac::convert" -> "convert"
+			// "eclipse4diac::io::ads" -> "ads"
+			final String[] parts = fullPackageName.split(PackageNameHelper.PACKAGE_NAME_DELIMITER);
+			final String leafPackage = parts[parts.length - 1];
+
+			leafPackageMap.computeIfAbsent(leafPackage, k -> new ArrayList<>()).add(entry);
+		}
+
+		// Create a section for each leaf package (already sorted alphabetically by
+		// TreeMap)
+		for (final Map.Entry<String, List<TypeEntry>> entry : leafPackageMap.entrySet()) {
+			final String packageName = entry.getKey();
+			final List<TypeEntry> packageTypes = entry.getValue();
+
+			// Sort types within each package
+			packageTypes.sort(Comparator.comparing(TypeEntry::getTypeName));
+
+			// Create section with types
+			final TypeSection packageSection = new TypeSection(packageName, packageTypes);
+			allCategories.addChildSection(packageSection);
+		}
+
+		return allCategories;
+	}
+
 }

@@ -9,6 +9,7 @@
  *******************************************************************************/
 package org.eclipse.fordiac.ide.gef.utilities;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import org.eclipse.jface.viewers.ITreeContentProvider;
@@ -28,8 +29,16 @@ public class TypeSectionContentProvider implements ITreeContentProvider {
 
 	@Override
 	public Object[] getChildren(final Object parentElement) {
-		if (parentElement instanceof TypeSection) {
-			return ((TypeSection) parentElement).getEntries().toArray();
+		if (parentElement instanceof final TypeSection section) {
+			final List<Object> children = new ArrayList<>();
+
+			// Add child sections first (e.g., "Standard Libraries" > "events", "core")
+			children.addAll(section.getChildSections());
+
+			// Then add type entries
+			children.addAll(section.getEntries());
+
+			return children.toArray();
 		}
 		return new Object[0];
 	}
@@ -42,7 +51,7 @@ public class TypeSectionContentProvider implements ITreeContentProvider {
 	@Override
 	public boolean hasChildren(final Object element) {
 		if (element instanceof TypeSection) {
-			return !((TypeSection) element).isEmpty();
+			return ((TypeSection) element).hasChildren();
 		}
 		return false;
 	}
