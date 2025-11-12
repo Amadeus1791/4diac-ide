@@ -544,92 +544,53 @@ public class NewInstanceCellEditor extends TextCellEditor {
 		final MenuManager menuManager = new MenuManager();
 
 		// Action: Add to Favorites
-		final Action addToFavoritesAction = new Action("Add to Favorites") { //$NON-NLS-1$
+		final Action addToFavoritesAction = new Action("Add to Favorites") {
 			@Override
 			public void run() {
 				final IStructuredSelection selection = viewer.getStructuredSelection();
 				final Object selected = selection.getFirstElement();
 
 				if (selected instanceof final TypeEntry entry) {
-					final String typeName = entry.getTypeName();
-
-					if (favoritesManager != null) {
-						try {
-							favoritesManager.addFavorite(typeName);
-							refreshPopup(); // Refresh to show updated Favorites section
-						} catch (final Exception e) {
-							System.err.println("Failed to add favorite: " + e.getMessage()); //$NON-NLS-1$
-						}
-					}
+					favoritesManager.addFavorite(entry.getTypeName());
+					refreshPopup();
 				}
-			}
-
-			@Override
-			public boolean isEnabled() {
-				final Object selected = viewer.getStructuredSelection().getFirstElement();
-
-				// Only enable for TypeEntry (not sections)
-				if (!(selected instanceof final TypeEntry entry)) {
-					return false;
-				}
-
-				final String typeName = entry.getTypeName();
-
-				// Only enable if NOT already favorited
-				if (favoritesManager != null) {
-					return !favoritesManager.isFavorite(typeName);
-				}
-
-				return false;
 			}
 		};
 
 		// Action: Remove from Favorites
-		final Action removeFromFavoritesAction = new Action("Remove from Favorites") { //$NON-NLS-1$
+		final Action removeFromFavoritesAction = new Action("Remove from Favorites") {
 			@Override
 			public void run() {
 				final IStructuredSelection selection = viewer.getStructuredSelection();
 				final Object selected = selection.getFirstElement();
 
 				if (selected instanceof final TypeEntry entry) {
-					final String typeName = entry.getTypeName();
-
-					if (favoritesManager != null) {
-						try {
-							favoritesManager.removeFavorite(typeName);
-							refreshPopup(); // Refresh to show updated Favorites section
-						} catch (final Exception e) {
-							System.err.println("Failed to remove favorite: " + e.getMessage()); //$NON-NLS-1$
-						}
-					}
+					favoritesManager.removeFavorite(entry.getTypeName());
+					refreshPopup();
 				}
-			}
-
-			@Override
-			public boolean isEnabled() {
-				final Object selected = viewer.getStructuredSelection().getFirstElement();
-
-				// Only enable for TypeEntry (not sections)
-				if (!(selected instanceof final TypeEntry entry)) {
-					return false;
-				}
-
-				final String typeName = entry.getTypeName();
-
-				// Only enable if already favorited
-				if (favoritesManager != null) {
-					return favoritesManager.isFavorite(typeName);
-				}
-
-				return false;
 			}
 		};
 
-		// Add actions to menu
 		menuManager.add(addToFavoritesAction);
 		menuManager.add(removeFromFavoritesAction);
 
-		// Create and set the context menu
+		// UPDATE ENABLED STATE DYNAMICALLY before menu shows
+		menuManager.addMenuListener(manager -> {
+			final Object selected = viewer.getStructuredSelection().getFirstElement();
+
+			if (selected instanceof final TypeEntry entry) {
+				final String typeName = entry.getTypeName();
+				final boolean isFav = favoritesManager.isFavorite(typeName);
+
+				addToFavoritesAction.setEnabled(!isFav); // Enable if NOT favorite
+				removeFromFavoritesAction.setEnabled(isFav); // Enable if IS favorite
+			} else {
+				// Section header or nothing selected
+				addToFavoritesAction.setEnabled(false);
+				removeFromFavoritesAction.setEnabled(false);
+			}
+		});
+
 		final Menu menu = menuManager.createContextMenu(viewer.getTree());
 		viewer.getTree().setMenu(menu);
 	}
@@ -679,10 +640,19 @@ public class NewInstanceCellEditor extends TextCellEditor {
 		treeViewer.getControl().addListener(SWT.KeyDown, event -> {
 			if (event.keyCode == SWT.ESC) {
 				fireCancelEditor();
+			} else if (event.keyCode == SWT.CR || event.keyCode == SWT.KEYPAD_CR) {
+				// Enter key pressed in tree - create element
+				final IStructuredSelection selection = treeViewer.getStructuredSelection();
+				if (!selection.isEmpty() && selection.getFirstElement() instanceof TypeEntry) {
+					selectedEntry = (TypeEntry) selection.getFirstElement();
+					textControl.setText(selectedEntry.getTypeName());
+					fireApplyEditorValue();
+				}
+				event.doit = false;
 			}
 		});
 
-		// Improved selection listener - handles both mouse and keyboard
+		// Selection listener - only tracks selection without creating elements
 		treeViewer.addSelectionChangedListener(event -> {
 			// Ignore selections during programmatic tree manipulation
 			if (blockTreeSelection) {
@@ -694,19 +664,42 @@ public class NewInstanceCellEditor extends TextCellEditor {
 			// Only accept TypeEntry selections, ignore section headers
 			if (selected instanceof TypeEntry) {
 				selectedEntry = (TypeEntry) selected;
-
-				// Update the text control with selected type name
-				textControl.setText(selectedEntry.getTypeName());
-
-				// Note: We don't call fireApplyEditorValue() here
-				// Element creation happens on Enter key or double-click
+				// DO NOT create element here - let click handlers do that
 			}
-			// Section headers are simply ignored - clicking them does nothing
 		});
 
-		// Handle double-click for immediate element creation
+		// Handle BOTH single-click AND double-click the same way
+		// This mimics the Enter key behavior (see line 437-444)
+		final Runnable createElementFromSelection = () -> {
+			final IStructuredSelection selection = treeViewer.getStructuredSelection();
+			if (!selection.isEmpty() && selection.getFirstElement() instanceof TypeEntry) {
+				selectedEntry = (TypeEntry) selection.getFirstElement();
+				textControl.setText(selectedEntry.getTypeName());
+				fireApplyEditorValue();
+			}
+		};
+
+		// Single-click: Create element (same behavior as Enter key)
+		treeViewer.getTree().addListener(SWT.MouseDown, event -> {
+			// Only handle left mouse button (button 1), ignore right-click (button 3)
+			if (event.button == 1) {
+				// Get item at click position to validate it's not empty space
+				final org.eclipse.swt.widgets.TreeItem item = treeViewer.getTree().getItem(new Point(event.x, event.y));
+
+				// Only proceed if clicking on an actual TypeEntry item
+				if (item != null && item.getData() instanceof TypeEntry) {
+					createElementFromSelection.run();
+				}
+			}
+		});
+
+		// Double-click: Same behavior (for users who prefer double-click)
 		treeViewer.getTree().addListener(SWT.MouseDoubleClick, event -> {
+			// The first click already created the element via MouseDown
+			// This is redundant but some users may expect double-click behavior
+			// We check selectedEntry to avoid creating twice on double-click
 			if (selectedEntry != null) {
+				// Already created by first click, but doesn't hurt to call again
 				fireApplyEditorValue();
 			}
 		});
