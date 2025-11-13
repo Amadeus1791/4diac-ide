@@ -14,13 +14,20 @@
  *******************************************************************************/
 package org.eclipse.fordiac.ide.application.editors;
 
+import org.eclipse.core.resources.IFile;
 import org.eclipse.core.resources.IProject;
 import org.eclipse.core.resources.IResourceChangeEvent;
 import org.eclipse.core.resources.IResourceDelta;
 import org.eclipse.core.resources.ResourcesPlugin;
 import org.eclipse.fordiac.ide.application.Messages;
+import org.eclipse.fordiac.ide.gef.utilities.FavoritesManager;
+import org.eclipse.fordiac.ide.model.typelibrary.TypeEntry;
 import org.eclipse.fordiac.ide.typemanagement.util.TypeListPatternFilter;
 import org.eclipse.gef.ui.palette.PaletteViewer;
+import org.eclipse.jface.action.Action;
+import org.eclipse.jface.action.MenuManager;
+import org.eclipse.jface.resource.ImageDescriptor;
+import org.eclipse.jface.viewers.IStructuredSelection;
 import org.eclipse.jface.viewers.ViewerFilter;
 import org.eclipse.swt.SWT;
 import org.eclipse.swt.events.MouseEvent;
@@ -31,7 +38,10 @@ import org.eclipse.swt.layout.GridData;
 import org.eclipse.swt.layout.GridLayout;
 import org.eclipse.swt.widgets.Composite;
 import org.eclipse.swt.widgets.Display;
+import org.eclipse.swt.widgets.Menu;
 import org.eclipse.swt.widgets.Text;
+import org.eclipse.ui.ISharedImages;
+import org.eclipse.ui.PlatformUI;
 import org.eclipse.ui.dialogs.PatternFilter;
 import org.eclipse.ui.navigator.CommonViewer;
 import org.eclipse.ui.navigator.CommonViewerSorter;
@@ -44,6 +54,7 @@ public class FBPaletteViewer extends PaletteViewer {
 	private PatternFilter patternFilter = null;
 	private final String navigatorId;
 	private Object[] expandedElements;
+	private final FavoritesManager favoritesManager = new FavoritesManager();
 
 	public FBPaletteViewer(final String navigatorId) {
 		this.navigatorId = navigatorId;
@@ -125,6 +136,99 @@ public class FBPaletteViewer extends PaletteViewer {
 
 		final GridData fillBoth = new GridData(GridData.FILL, GridData.FILL, true, true);
 		commonViewer.getControl().setLayoutData(fillBoth);
+
+		// Add favorites context menu
+		addFavoritesContextMenu();
+	}
+
+	/**
+	 * Add context menu to palette for favorites management
+	 */
+	private void addFavoritesContextMenu() {
+		final MenuManager menuManager = new MenuManager();
+		final ISharedImages sharedImages = PlatformUI.getWorkbench().getSharedImages();
+
+		// Action: Add to Favorites
+		final Action addToFavoritesAction = new Action("Add to Favorites") {
+			@Override
+			public void run() {
+				final IStructuredSelection selection = commonViewer.getStructuredSelection();
+				final Object selected = selection.getFirstElement();
+
+				final String typeName = getTypeName(selected);
+				if (typeName != null) {
+					favoritesManager.addFavorite(typeName);
+				}
+			}
+		};
+		addToFavoritesAction.setImageDescriptor(
+				ImageDescriptor.createFromImage(sharedImages.getImage(ISharedImages.IMG_OBJS_BKMRK_TSK)));
+
+		// Action: Remove from Favorites
+		final Action removeFromFavoritesAction = new Action("Remove from Favorites") {
+			@Override
+			public void run() {
+				final IStructuredSelection selection = commonViewer.getStructuredSelection();
+				final Object selected = selection.getFirstElement();
+
+				final String typeName = getTypeName(selected);
+				if (typeName != null) {
+					favoritesManager.removeFavorite(typeName);
+				}
+			}
+		};
+		removeFromFavoritesAction.setImageDescriptor(
+				ImageDescriptor.createFromImage(sharedImages.getImage(ISharedImages.IMG_ELCL_REMOVE)));
+
+		menuManager.add(addToFavoritesAction);
+		menuManager.add(removeFromFavoritesAction);
+
+		// Update enabled state dynamically before menu shows
+		menuManager.addMenuListener(manager -> {
+			final Object selected = commonViewer.getStructuredSelection().getFirstElement();
+			final String typeName = getTypeName(selected);
+
+			if (typeName != null) {
+				final boolean isFav = favoritesManager.isFavorite(typeName);
+				addToFavoritesAction.setEnabled(!isFav);
+				removeFromFavoritesAction.setEnabled(isFav);
+			} else {
+				addToFavoritesAction.setEnabled(false);
+				removeFromFavoritesAction.setEnabled(false);
+			}
+		});
+
+		final Menu menu = menuManager.createContextMenu(commonViewer.getTree());
+		commonViewer.getTree().setMenu(menu);
+	}
+
+	/**
+	 * Extract type name from selection (supports both TypeEntry and IFile)
+	 */
+	private String getTypeName(final Object element) {
+		if (element instanceof TypeEntry) {
+			return ((TypeEntry) element).getTypeName();
+		}
+		if (element instanceof final IFile file) {
+			final String extension = file.getFileExtension();
+			if (isFBTypeFile(extension)) {
+				return TypeEntry.getTypeNameFromFile(file);
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * Check if file is an FB type
+	 */
+	private static boolean isFBTypeFile(final String extension) {
+		if (extension == null) {
+			return false;
+		}
+		return "fbt".equalsIgnoreCase(extension) || //$NON-NLS-1$
+				"fct".equalsIgnoreCase(extension) || //$NON-NLS-1$
+				"adp".equalsIgnoreCase(extension) || //$NON-NLS-1$
+				"sub".equalsIgnoreCase(extension); //$NON-NLS-1$
 	}
 
 	private void setSearchFilter(final String string) {
