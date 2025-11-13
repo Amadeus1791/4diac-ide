@@ -8,7 +8,7 @@
  * SPDX-License-Identifier: EPL-2.0
  *
  * Contributors:
- *   [Your Name] - initial API and implementation
+ *   Wolfgang Schedl - initial API and implementation
  *******************************************************************************/
 package org.eclipse.fordiac.ide.gef.utilities;
 
@@ -56,29 +56,12 @@ public class FavoritesManager {
 	 * @param fbTypeName the full type name (e.g., "E_CYCLE", "E_SWITCH")
 	 * @return true if the type was added (wasn't already a favorite)
 	 */
-//	public synchronized boolean addFavorite(final String fbTypeName) {
-//		if (fbTypeName == null || fbTypeName.isEmpty()) {
-//			return false;
-//		}
-//
-//		final boolean added = favoritesList.add(fbTypeName);
-//
-//		if (added) {
-//			saveToPreferences();
-//		}
-//
-//		return added;
-//	}
 	public synchronized boolean addFavorite(final String fbTypeName) {
 		if (fbTypeName == null || fbTypeName.isEmpty()) {
 			return false;
 		}
 
-		System.out.println(
-				"[FavoritesManager] Adding '" + fbTypeName + "' to list. Current size: " + favoritesList.size());
 		final boolean added = favoritesList.add(fbTypeName);
-		System.out.println("[FavoritesManager] Add result: " + added + ", new size: " + favoritesList.size());
-		System.out.println("[FavoritesManager] List contents: " + favoritesList);
 
 		if (added) {
 			saveToPreferences();
@@ -170,57 +153,11 @@ public class FavoritesManager {
 	/**
 	 * Save favorites list to Eclipse instance preferences.
 	 */
-//	private void saveToPreferences() {
-//		try {
-//			final StringBuilder sb = new StringBuilder();
-//			int i = 0;
-//			for (final String favorite : favoritesList) {
-//				if (i > 0) {
-//					sb.append(DELIMITER);
-//				}
-//				sb.append(favorite);
-//				i++;
-//			}
-//
-//			preferences.put(PREF_KEY, sb.toString());
-//			preferences.flush();
-//
-//		} catch (final BackingStoreException e) {
-//			System.err.println("[Favorites] Failed to save preferences: " + e.getMessage()); //$NON-NLS-1$
-//		} catch (final Exception e) {
-//			System.err.println("[Favorites] Unexpected error saving favorites: " + e.getMessage()); //$NON-NLS-1$
-//			e.printStackTrace();
-//		}
-//	}
-//	private void saveToPreferences() {
-//		try {
-//			final String str = """
-//					""";
-//			// ... existing code ...
-//
-//			System.out.println("[FavoritesManager] About to save: " + str);
-//			preferences.put(PREF_KEY, str);
-//			System.out.println("[FavoritesManager] Put succeeded, about to flush...");
-//			preferences.flush();
-//			System.out.println("[FavoritesManager] Flush succeeded!");
-//
-//		} catch (final BackingStoreException e) {
-//			System.err.println("[FavoritesManager] Failed to save preferences: " + e.getMessage());
-//			e.printStackTrace(); // IMPORTANT: Show full stack trace
-//		}
-//	}
-
 	private void saveToPreferences() {
 		try {
 			final StringBuilder sb = new StringBuilder();
-
-			System.out.println(
-					"[FavoritesManager] saveToPreferences called. favoritesList size: " + favoritesList.size());
-			System.out.println("[FavoritesManager] favoritesList contents: " + favoritesList);
-
 			int i = 0;
 			for (final String favorite : favoritesList) {
-				System.out.println("[FavoritesManager] Processing favorite #" + i + ": '" + favorite + "'");
 				if (i > 0) {
 					sb.append(DELIMITER);
 				}
@@ -228,19 +165,14 @@ public class FavoritesManager {
 				i++;
 			}
 
-			System.out.println("[FavoritesManager] About to save: " + sb.toString());
 			preferences.put(PREF_KEY, sb.toString());
-			System.out.println("[FavoritesManager] Put succeeded, about to flush...");
 			preferences.flush();
-			System.out.println("[FavoritesManager] Flush succeeded!");
 
 		} catch (final BackingStoreException e) {
-			System.err.println("[FavoritesManager] Failed to save preferences: " + e.getMessage());
-			e.printStackTrace();
+			System.err.println("[Favorites] Failed to save preferences: " + e.getMessage()); //$NON-NLS-1$
 		} catch (final Exception e) {
-			System.err.println("[FavoritesManager] Unexpected error saving favorites: " + e.getMessage());
+			System.err.println("[Favorites] Unexpected error saving favorites: " + e.getMessage()); //$NON-NLS-1$
 			e.printStackTrace();
 		}
 	}
-
 }

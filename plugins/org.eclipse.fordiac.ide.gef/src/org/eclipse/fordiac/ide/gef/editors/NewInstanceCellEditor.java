@@ -38,6 +38,7 @@ import org.eclipse.fordiac.ide.model.typelibrary.TypeLibrary;
 import org.eclipse.fordiac.ide.ui.imageprovider.FordiacImage;
 import org.eclipse.jface.action.Action;
 import org.eclipse.jface.action.MenuManager;
+import org.eclipse.jface.resource.ImageDescriptor;
 import org.eclipse.jface.viewers.ColumnViewerToolTipSupport;
 import org.eclipse.jface.viewers.ColumnWeightData;
 import org.eclipse.jface.viewers.DelegatingStyledCellLabelProvider;
@@ -59,6 +60,8 @@ import org.eclipse.swt.widgets.Event;
 import org.eclipse.swt.widgets.Menu;
 import org.eclipse.swt.widgets.Shell;
 import org.eclipse.swt.widgets.Text;
+import org.eclipse.ui.ISharedImages;
+import org.eclipse.ui.PlatformUI;
 
 public class NewInstanceCellEditor extends TextCellEditor {
 
@@ -572,6 +575,7 @@ public class NewInstanceCellEditor extends TextCellEditor {
 	 */
 	private void addContextMenu(final TreeViewer viewer) {
 		final MenuManager menuManager = new MenuManager();
+		final ISharedImages sharedImages = PlatformUI.getWorkbench().getSharedImages();
 
 		// Action: Add to Favorites
 		final Action addToFavoritesAction = new Action("Add to Favorites") {
@@ -586,6 +590,9 @@ public class NewInstanceCellEditor extends TextCellEditor {
 				}
 			}
 		};
+		// Set bookmark icon for Add to Favorites
+		addToFavoritesAction.setImageDescriptor(
+				ImageDescriptor.createFromImage(sharedImages.getImage(ISharedImages.IMG_OBJS_BKMRK_TSK)));
 
 		// Action: Remove from Favorites
 		final Action removeFromFavoritesAction = new Action("Remove from Favorites") {
@@ -600,6 +607,9 @@ public class NewInstanceCellEditor extends TextCellEditor {
 				}
 			}
 		};
+		// Set remove icon for Remove from Favorites
+		removeFromFavoritesAction.setImageDescriptor(
+				ImageDescriptor.createFromImage(sharedImages.getImage(ISharedImages.IMG_ELCL_REMOVE)));
 
 		menuManager.add(addToFavoritesAction);
 		menuManager.add(removeFromFavoritesAction);

@@ -104,7 +104,26 @@
 		    </iterate>
          </activeWhen>
       </handler>
-      
+      <handler
+      class="org.eclipse.fordiac.ide.systemmanagement.ui.handlers.AddToFavoritesHandler"
+      commandId="org.eclipse.fordiac.ide.systemmanagement.ui.addToFavorites">
+   <activeWhen>
+      <iterate>
+         <or>
+            <instanceof value="org.eclipse.fordiac.ide.model.typelibrary.TypeEntry" />
+            <and>
+               <instanceof value="org.eclipse.core.resources.IFile" />
+               <or>
+                  <test property="org.eclipse.core.resources.extension" value="fbt"/>
+                  <test property="org.eclipse.core.resources.extension" value="fct"/>
+                  <test property="org.eclipse.core.resources.extension" value="adp"/>
+                  <test property="org.eclipse.core.resources.extension" value="sub"/>
+               </or>
+            </and>
+         </or>
+      </iterate>
+   </activeWhen>
+</handler>
       </extension>
       <extension
          point="org.eclipse.ui.commands"> 
@@ -113,6 +132,11 @@
             id="org.eclipse.fordiac.ide.systemmanagement.ui.systemexplorer.refresh"
             name="%SystemExplorer_Refresh">
       </command>
+      <command
+      categoryId="org.eclipse.fordiac.ide.commands.category"
+      id="org.eclipse.fordiac.ide.systemmanagement.ui.addToFavorites"
+      name="Toggle Favorites">
+</command>
    </extension>
       <extension
          point="org.eclipse.ui.menus">
@@ -143,6 +167,30 @@
                 value="org.eclipse.fordiac.ide.systemmanagement.ui.wizard.New4diacProjectWizard" />
         </command>
       </menuContribution>
+      <menuContribution
+      locationURI="popup:org.eclipse.ui.popup.any?after=additions">
+   <dynamic
+         class="org.eclipse.fordiac.ide.systemmanagement.ui.handlers.FavoritesMenuContribution"
+         id="org.eclipse.fordiac.ide.systemmanagement.ui.favoritesMenu">
+      <visibleWhen checkEnabled="false">
+         <iterate>
+            <or>
+               <instanceof value="org.eclipse.fordiac.ide.model.typelibrary.TypeEntry" />
+               <and>
+                  <instanceof value="org.eclipse.core.resources.IFile" />
+                  <or>
+                     <test property="org.eclipse.core.resources.extension" value="fbt"/>
+                     <test property="org.eclipse.core.resources.extension" value="fct"/>
+                     <test property="org.eclipse.core.resources.extension" value="adp"/>
+                     <test property="org.eclipse.core.resources.extension" value="sub"/>
+                  </or>
+               </and>
+            </or>
+         </iterate>
+      </visibleWhen>
+   </dynamic>
+</menuContribution>
+
    </extension>
       <extension
             point="org.eclipse.ui.views.properties.tabbed.propertyContributor">
