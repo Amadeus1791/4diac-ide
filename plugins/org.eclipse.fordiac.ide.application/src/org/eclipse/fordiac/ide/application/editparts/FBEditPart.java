@@ -56,12 +56,55 @@ public class FBEditPart extends AbstractBlockFBNElementEditPart {
 
 	@Override
 	public void performRequest(final Request request) {
+		// Check for Shift+Click to activate chain mode
+		if (request instanceof final org.eclipse.gef.requests.SelectionRequest selRequest) {
+			if (selRequest.isShiftKeyPressed()) {
+				System.out.println("[FBEditPart] Shift+Click detected on: " + getModel().getName());
+				handleShiftClickChainMode();
+				return; // Don't call super - we handled it
+			}
+		}
+
 		if (request.getType().equals(RequestConstants.REQ_OPEN) && getModel() != null
 				&& getModel() instanceof CFBInstance) {
 			OpenListenerManager.openEditor(getModel());
 		} else {
 			super.performRequest(request);
 		}
+	}
+
+	private void handleShiftClickChainMode() {
+		System.out.println("[FBEditPart] handleShiftClickChainMode called");
+
+		final FB fb = getModel();
+		System.out.println("[FBEditPart] FB: " + fb.getName());
+
+		// Find first event output
+		final org.eclipse.fordiac.ide.model.libraryElement.InterfaceList interfaceList = fb.getInterface();
+		if (interfaceList == null) {
+			System.out.println("[FBEditPart] ERROR: No interface list");
+			return;
+		}
+
+		final org.eclipse.emf.common.util.EList<org.eclipse.fordiac.ide.model.libraryElement.Event> eventOutputs = interfaceList
+				.getEventOutputs();
+		if (eventOutputs.isEmpty()) {
+			System.out.println("[FBEditPart] WARNING: No event outputs found");
+			return;
+		}
+
+		final org.eclipse.fordiac.ide.model.libraryElement.IInterfaceElement outputPin = eventOutputs.get(0);
+		System.out.println("[FBEditPart] Found output pin: " + outputPin.getName());
+
+		// Activate chain mode
+		final org.eclipse.fordiac.ide.gef.tools.ChainModeManager chainManager = org.eclipse.fordiac.ide.gef.tools.ChainModeManager
+				.getInstance();
+		chainManager.enterChainMode(fb, outputPin);
+
+		// Refresh visual
+		refresh();
+
+		System.out.println("[FBEditPart] Chain mode activated!");
 	}
 
 }

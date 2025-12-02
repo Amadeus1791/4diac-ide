@@ -1,6 +1,7 @@
 /*******************************************************************************
  * Copyright (c) 2019 Johannes Kepler University Linz
  * 				 2022 Primetals Technologies Germany GmbH
+ * 				 2025 Chain Mode Integration
  *
  * This program and the accompanying materials are made available under the
  * terms of the Eclipse Public License 2.0 which is available at
@@ -11,6 +12,7 @@
  * Contributors:
  *   Alois Zoitl - initial API and implementation and/or initial documentation
  *   Fabio Gandolfi - insideCell parameter to use the CellEditor inside TableViewer cells
+ *   [Your Name] - chain mode integration
  *******************************************************************************/
 package org.eclipse.fordiac.ide.gef.editors;
 
@@ -22,6 +24,7 @@ import java.util.TreeMap;
 
 import org.eclipse.core.resources.IProject;
 import org.eclipse.fordiac.ide.gef.Messages;
+import org.eclipse.fordiac.ide.gef.tools.ChainModeManager;
 import org.eclipse.fordiac.ide.gef.utilities.CellEditorLayoutFactory;
 import org.eclipse.fordiac.ide.gef.utilities.FavoritesManager;
 import org.eclipse.fordiac.ide.gef.utilities.FrequencyTracker;
@@ -53,10 +56,12 @@ import org.eclipse.swt.graphics.Point;
 import org.eclipse.swt.graphics.Rectangle;
 import org.eclipse.swt.layout.FillLayout;
 import org.eclipse.swt.layout.GridData;
+import org.eclipse.swt.layout.GridLayout;
 import org.eclipse.swt.widgets.Button;
 import org.eclipse.swt.widgets.Composite;
 import org.eclipse.swt.widgets.Control;
 import org.eclipse.swt.widgets.Event;
+import org.eclipse.swt.widgets.Label;
 import org.eclipse.swt.widgets.Menu;
 import org.eclipse.swt.widgets.Shell;
 import org.eclipse.swt.widgets.Text;
@@ -88,6 +93,12 @@ public class NewInstanceCellEditor extends TextCellEditor {
 	private ResultListLabelProvider resultListLabelProvider;
 	private TypeSectionLabelProvider typeSectionLabelProvider;
 
+	// ════════════════════════════════════════════════════════════════
+	// CHAIN MODE: Add these fields
+	// ════════════════════════════════════════════════════════════════
+	private Label chainModeIndicator;
+	private Composite chainModeBar;
+
 	public NewInstanceCellEditor() {
 	}
 
@@ -102,6 +113,7 @@ public class NewInstanceCellEditor extends TextCellEditor {
 	public NewInstanceCellEditor(final Composite parent, final int style, final boolean insideCell) {
 		super(parent, style | SWT.SEARCH | SWT.ICON_CANCEL | SWT.ICON_SEARCH);
 		this.insideCell = insideCell;
+		System.out.println("[NewInstanceCellEditor] Created with insideCell=" + insideCell);
 	}
 
 	public Button getMenuButton() {
@@ -117,9 +129,10 @@ public class NewInstanceCellEditor extends TextCellEditor {
 				final IProject project = typeLib.getProject();
 				if (project != null && project.exists()) {
 					mruTracker = new MostRecentlyUsedTracker(project);
+					System.out.println("[NewInstanceCellEditor] MRU tracker initialized");
 				}
 			} catch (final Exception e) {
-				System.err.println("Failed to initialize MRUTracker: " + e.getMessage()); //$NON-NLS-1$
+				System.err.println("Failed to initialize MRUTracker: " + e.getMessage());
 				e.printStackTrace();
 			}
 		}
@@ -129,7 +142,7 @@ public class NewInstanceCellEditor extends TextCellEditor {
 			try {
 				favoritesManager = new FavoritesManager();
 			} catch (final Exception e) {
-				System.err.println("Failed to initialize FavoritesManager: " + e.getMessage()); //$NON-NLS-1$
+				System.err.println("Failed to initialize FavoritesManager: " + e.getMessage());
 				e.printStackTrace();
 			}
 		}
@@ -139,7 +152,7 @@ public class NewInstanceCellEditor extends TextCellEditor {
 			try {
 				frequencyTracker = new FrequencyTracker();
 			} catch (final Exception e) {
-				System.err.println("Failed to initialize FrequencyTracker: " + e.getMessage()); //$NON-NLS-1$
+				System.err.println("Failed to initialize FrequencyTracker: " + e.getMessage());
 				e.printStackTrace();
 			}
 		}
@@ -160,14 +173,94 @@ public class NewInstanceCellEditor extends TextCellEditor {
 
 	@Override
 	protected Control createControl(final Composite parent) {
+		System.out.println("[NewInstanceCellEditor] createControl called");
 		container = createContainer(parent);
+
+		// ════════════════════════════════════════════════════════════════
+		// CHAIN MODE: Create chain mode indicator bar
+		// ════════════════════════════════════════════════════════════════
+		createChainModeBar(container);
+
 		textControl = (Text) super.createControl(container);
 		configureTextControl();
 		createTypeMenuButton(container);
 		createPopUpList(container);
+
 		// initial population of the selection list
 		updateSelectionList();
+
+		// ════════════════════════════════════════════════════════════════
+		// CHAIN MODE: Update UI based on chain mode state
+		// ════════════════════════════════════════════════════════════════
+		updateChainModeUI();
+
 		return container;
+	}
+
+	// ════════════════════════════════════════════════════════════════
+	// CHAIN MODE: Add these new methods
+	// ════════════════════════════════════════════════════════════════
+
+	/**
+	 * Create the chain mode indicator bar at the top of the editor.
+	 */
+	private void createChainModeBar(final Composite parent) {
+		System.out.println("[NewInstanceCellEditor] Creating chain mode bar");
+
+		chainModeBar = new Composite(parent, SWT.NONE);
+		chainModeBar.setLayout(new GridLayout(1, false));
+		chainModeBar.setLayoutData(new GridData(SWT.FILL, SWT.TOP, true, false));
+		chainModeBar.setVisible(false); // Hidden by default
+
+		chainModeIndicator = new Label(chainModeBar, SWT.NONE);
+		chainModeIndicator.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false));
+		chainModeIndicator.setText("🔗 Chain Mode: ");
+
+		// Style the indicator
+		chainModeIndicator.setForeground(parent.getDisplay().getSystemColor(SWT.COLOR_DARK_GREEN));
+	}
+
+	/**
+	 * Update the chain mode UI based on current state.
+	 */
+	private void updateChainModeUI() {
+		if (chainModeBar == null || chainModeBar.isDisposed()) {
+			return;
+		}
+
+		final ChainModeManager chainManager = ChainModeManager.getInstance();
+		final boolean isChainMode = chainManager.isChainModeActive();
+
+		System.out.println("[NewInstanceCellEditor] Updating chain mode UI - Active: " + isChainMode);
+
+		if (isChainMode) {
+			// Show chain mode indicator with breadcrumb
+			final String breadcrumb = chainManager.getChainBreadcrumb();
+			chainModeIndicator.setText("🔗 Chain Mode: " + breadcrumb);
+			chainModeBar.setVisible(true);
+
+			// Update search placeholder
+			if (textControl != null && !textControl.isDisposed()) {
+				textControl.setMessage("Search next element in chain...");
+			}
+
+			System.out.println("[NewInstanceCellEditor] Chain mode UI shown: " + breadcrumb);
+		} else {
+			// Hide chain mode indicator
+			chainModeBar.setVisible(false);
+
+			// Reset search placeholder
+			if (textControl != null && !textControl.isDisposed()) {
+				textControl.setMessage(Messages.NewInstanceCellEditor_SearchForType);
+			}
+
+			System.out.println("[NewInstanceCellEditor] Chain mode UI hidden");
+		}
+
+		// Force layout update
+		if (container != null && !container.isDisposed()) {
+			container.layout(true, true);
+		}
 	}
 
 	public Text getText() {
@@ -176,7 +269,9 @@ public class NewInstanceCellEditor extends TextCellEditor {
 
 	@Override
 	public void focusLost() {
+		System.out.println("[NewInstanceCellEditor] focusLost called");
 		if (!insideAnyEditorArea()) {
+			System.out.println("[NewInstanceCellEditor] Focus lost outside editor - cancelling");
 			// when we loose focus we fire cancel, so that the entered text is not applied
 			fireCancelEditor();
 		}
@@ -185,11 +280,13 @@ public class NewInstanceCellEditor extends TextCellEditor {
 	// make the fireCancleEditor publicly available for the direct edit manager
 	@Override
 	public void fireCancelEditor() {
+		System.out.println("[NewInstanceCellEditor] fireCancelEditor called");
 		super.fireCancelEditor();
 	}
 
 	@Override
 	public void deactivate() {
+		System.out.println("[NewInstanceCellEditor] deactivate called");
 		if (null != popupShell && !popupShell.isDisposed()) {
 			popupShell.setVisible(false);
 		}
@@ -198,6 +295,7 @@ public class NewInstanceCellEditor extends TextCellEditor {
 
 	@Override
 	protected void handleDefaultSelection(final SelectionEvent event) {
+		System.out.println("[NewInstanceCellEditor] handleDefaultSelection called");
 		if (!((Text) event.getSource()).getText().isEmpty()) {
 			super.handleDefaultSelection(event);
 		}
@@ -205,13 +303,17 @@ public class NewInstanceCellEditor extends TextCellEditor {
 
 	@Override
 	public Object doGetValue() {
+		System.out.println("[NewInstanceCellEditor] doGetValue called");
 		if (null != selectedEntry) {
+			System.out.println("[NewInstanceCellEditor] Returning selected entry: " + selectedEntry.getTypeName());
+
 			// Record usage in MRU tracker
 			if (mruTracker != null && !mruTracker.isDisposed()) {
 				try {
 					mruTracker.recordUsage(selectedEntry.getTypeName());
+					System.out.println("[NewInstanceCellEditor] Recorded MRU usage");
 				} catch (final Exception e) {
-					System.err.println("Failed to record MRU usage: " + e.getMessage()); //$NON-NLS-1$
+					System.err.println("Failed to record MRU usage: " + e.getMessage());
 				}
 			}
 
@@ -220,12 +322,13 @@ public class NewInstanceCellEditor extends TextCellEditor {
 				try {
 					frequencyTracker.recordUsage(selectedEntry.getTypeName());
 				} catch (final Exception e) {
-					System.err.println("Failed to record Frequency usage: " + e.getMessage()); //$NON-NLS-1$
+					System.err.println("Failed to record Frequency usage: " + e.getMessage());
 				}
 			}
 
 			return selectedEntry;
 		}
+		System.out.println("[NewInstanceCellEditor] No selected entry, using default");
 		return super.doGetValue();
 	}
 
@@ -237,6 +340,7 @@ public class NewInstanceCellEditor extends TextCellEditor {
 	}
 
 	protected Composite createContainer(final Composite parent) {
+		System.out.println("[NewInstanceCellEditor] createContainer called");
 		final Composite newContainer = new Composite(parent, SWT.NONE) {
 			@Override
 			public void setBounds(final int x, final int y, final int width, final int height) {
@@ -265,6 +369,7 @@ public class NewInstanceCellEditor extends TextCellEditor {
 	}
 
 	public void configureTextControl() {
+		System.out.println("[NewInstanceCellEditor] configureTextControl called");
 		textControl.setLayoutData(new GridData(SWT.FILL, SWT.TOP, true, true));
 		textControl.setMessage(Messages.NewInstanceCellEditor_SearchForType);
 		textControl.addListener(SWT.Modify, event -> updateSelectionList());
@@ -274,13 +379,15 @@ public class NewInstanceCellEditor extends TextCellEditor {
 	protected void updateSelectionList() {
 		blockTreeSelection = true;
 		final String searchText = textControl.getText();
+		System.out.println("[NewInstanceCellEditor] updateSelectionList - Search text: '" + searchText + "'");
 
 		if (searchText.length() >= 2) {
 			// Normal search with 2+ characters - show only All Types section
 			final List<TypeEntry> entries = paletteFilter.findFBAndSubappTypes(searchText);
+			System.out.println("[NewInstanceCellEditor] Found " + entries.size() + " matching entries");
 			final List<TypeSection> sections = new ArrayList<>();
 
-			final TypeSection allTypesSection = new TypeSection("All Types", entries); //$NON-NLS-1$
+			final TypeSection allTypesSection = new TypeSection("All Types", entries);
 			sections.add(allTypesSection);
 
 			typeSectionLabelProvider.setSearchString(searchText);
@@ -293,9 +400,11 @@ public class NewInstanceCellEditor extends TextCellEditor {
 			markDirty();
 		} else if (searchText.length() == 0) {
 			// Show sectioned view with Recent/Favorites/Frequent
+			System.out.println("[NewInstanceCellEditor] Empty search - showing sectioned view");
 			showSectionedView();
 		} else {
 			// 1 character typed - hide list (keep current behavior)
+			System.out.println("[NewInstanceCellEditor] 1 character - hiding list");
 			treeViewer.setInput(null);
 		}
 
@@ -336,7 +445,7 @@ public class NewInstanceCellEditor extends TextCellEditor {
 		sections.add(allCategoriesSection); // Always add, even if empty
 
 		if (!sections.isEmpty()) {
-			typeSectionLabelProvider.setSearchString(""); //$NON-NLS-1$
+			typeSectionLabelProvider.setSearchString("");
 			treeViewer.setInput(sections);
 
 			// Expand Recent, Favorites, Frequent but NOT All Categories
@@ -352,7 +461,7 @@ public class NewInstanceCellEditor extends TextCellEditor {
 	 * Create the Recent section from MRU tracker
 	 */
 	private TypeSection createRecentSection() {
-		final TypeSection section = new TypeSection("Recent"); //$NON-NLS-1$
+		final TypeSection section = new TypeSection("Recent");
 
 		if (mruTracker == null || mruTracker.isDisposed()) {
 			return section;
@@ -379,13 +488,12 @@ public class NewInstanceCellEditor extends TextCellEditor {
 	 * Create the Favorites section from FavoritesManager
 	 */
 	private TypeSection createFavoritesSection() {
-		final TypeSection section = new TypeSection("Favorites"); //$NON-NLS-1$
+		final TypeSection section = new TypeSection("Favorites");
 
 		if (favoritesManager == null) {
 			return section;
 		}
 
-		// FIX #2: Convert Set<String> to List<String>
 		final List<String> favoriteTypeNames = new ArrayList<>(favoritesManager.getFavorites());
 
 		for (final String typeName : favoriteTypeNames) {
@@ -402,7 +510,7 @@ public class NewInstanceCellEditor extends TextCellEditor {
 	 * Create the Frequent section from FrequencyTracker
 	 */
 	private TypeSection createFrequentSection() {
-		final TypeSection section = new TypeSection("Frequent"); //$NON-NLS-1$
+		final TypeSection section = new TypeSection("Frequent");
 
 		if (frequencyTracker == null) {
 			return section;
@@ -421,8 +529,7 @@ public class NewInstanceCellEditor extends TextCellEditor {
 	}
 
 	/**
-	 * Select the first TypeEntry in the tree (skipping section headers) FIX #3: Use
-	 * treeViewer.getTree().getItem(0).getData() instead of getElementAt()
+	 * Select the first TypeEntry in the tree (skipping section headers)
 	 */
 	private void selectFirstTypeEntry() {
 		blockTreeSelection = true;
@@ -440,6 +547,8 @@ public class NewInstanceCellEditor extends TextCellEditor {
 	}
 
 	private void handleKeyPress(final Event event, final Text textControl) {
+		System.out.println("[NewInstanceCellEditor] Key pressed: " + event.keyCode);
+
 		switch (event.keyCode) {
 		case SWT.ARROW_DOWN:
 			navigateTree(true);
@@ -454,8 +563,10 @@ public class NewInstanceCellEditor extends TextCellEditor {
 				final IStructuredSelection selection = treeViewer.getStructuredSelection();
 				if (!selection.isEmpty() && selection.getFirstElement() instanceof TypeEntry) {
 					selectedEntry = (TypeEntry) selection.getFirstElement();
-					textControl.setText(selectedEntry.getTypeName()); // ← Add if missing
-					fireApplyEditorValue(); // ← This should be here
+					textControl.setText(selectedEntry.getTypeName());
+					System.out.println(
+							"[NewInstanceCellEditor] Enter pressed - selected: " + selectedEntry.getTypeName());
+					fireApplyEditorValue();
 				}
 			} else {
 				event.doit = false;
@@ -482,6 +593,19 @@ public class NewInstanceCellEditor extends TextCellEditor {
 					event.doit = false;
 				}
 			}
+			break;
+		// ════════════════════════════════════════════════════════════════
+		// CHAIN MODE: Handle ESC key to exit chain mode
+		// ════════════════════════════════════════════════════════════════
+		case SWT.ESC:
+			System.out.println("[NewInstanceCellEditor] ESC pressed");
+			final ChainModeManager chainManager = ChainModeManager.getInstance();
+			if (chainManager.isChainModeActive()) {
+				System.out.println("[NewInstanceCellEditor] Exiting chain mode via ESC");
+				chainManager.exitChainMode();
+				updateChainModeUI();
+			}
+			fireCancelEditor();
 			break;
 		default:
 			break;
@@ -547,7 +671,6 @@ public class NewInstanceCellEditor extends TextCellEditor {
 		if (nextItem.getData() instanceof TypeEntry) {
 			selectedEntry = (TypeEntry) nextItem.getData();
 		}
-		// else: Selected a section header - don't update selectedEntry
 
 		blockTreeSelection = false;
 	}
@@ -590,7 +713,6 @@ public class NewInstanceCellEditor extends TextCellEditor {
 				}
 			}
 		};
-		// Set bookmark icon for Add to Favorites
 		addToFavoritesAction.setImageDescriptor(
 				ImageDescriptor.createFromImage(sharedImages.getImage(ISharedImages.IMG_OBJS_BKMRK_TSK)));
 
@@ -607,14 +729,12 @@ public class NewInstanceCellEditor extends TextCellEditor {
 				}
 			}
 		};
-		// Set remove icon for Remove from Favorites
 		removeFromFavoritesAction.setImageDescriptor(
 				ImageDescriptor.createFromImage(sharedImages.getImage(ISharedImages.IMG_ELCL_REMOVE)));
 
 		menuManager.add(addToFavoritesAction);
 		menuManager.add(removeFromFavoritesAction);
 
-		// UPDATE ENABLED STATE DYNAMICALLY before menu shows
 		menuManager.addMenuListener(manager -> {
 			final Object selected = viewer.getStructuredSelection().getFirstElement();
 
@@ -622,10 +742,9 @@ public class NewInstanceCellEditor extends TextCellEditor {
 				final String typeName = entry.getTypeName();
 				final boolean isFav = favoritesManager.isFavorite(typeName);
 
-				addToFavoritesAction.setEnabled(!isFav); // Enable if NOT favorite
-				removeFromFavoritesAction.setEnabled(isFav); // Enable if IS favorite
+				addToFavoritesAction.setEnabled(!isFav);
+				removeFromFavoritesAction.setEnabled(isFav);
 			} else {
-				// Section header or nothing selected
 				addToFavoritesAction.setEnabled(false);
 				removeFromFavoritesAction.setEnabled(false);
 			}
@@ -643,15 +762,10 @@ public class NewInstanceCellEditor extends TextCellEditor {
 			return;
 		}
 
-		// Get current search text
 		final String searchText = textControl.getText();
-
-		// Update the selection list (this rebuilds all sections)
 		updateSelectionList();
 
-		// If search was empty, we're in sectioned view - restore selection if possible
 		if (searchText.isEmpty() && selectedEntry != null) {
-			// Try to reselect the previously selected entry
 			blockTreeSelection = true;
 			treeViewer.setSelection(new StructuredSelection(selectedEntry), true);
 			blockTreeSelection = false;
@@ -681,7 +795,6 @@ public class NewInstanceCellEditor extends TextCellEditor {
 			if (event.keyCode == SWT.ESC) {
 				fireCancelEditor();
 			} else if (event.keyCode == SWT.CR || event.keyCode == SWT.KEYPAD_CR) {
-				// Enter key pressed in tree - create element
 				final IStructuredSelection selection = treeViewer.getStructuredSelection();
 				if (!selection.isEmpty() && selection.getFirstElement() instanceof TypeEntry) {
 					selectedEntry = (TypeEntry) selection.getFirstElement();
@@ -692,24 +805,18 @@ public class NewInstanceCellEditor extends TextCellEditor {
 			}
 		});
 
-		// Selection listener - only tracks selection without creating elements
 		treeViewer.addSelectionChangedListener(event -> {
-			// Ignore selections during programmatic tree manipulation
 			if (blockTreeSelection) {
 				return;
 			}
 
 			final Object selected = event.getStructuredSelection().getFirstElement();
 
-			// Only accept TypeEntry selections, ignore section headers
 			if (selected instanceof TypeEntry) {
 				selectedEntry = (TypeEntry) selected;
-				// DO NOT create element here - let click handlers do that
 			}
 		});
 
-		// Handle BOTH single-click AND double-click the same way
-		// This mimics the Enter key behavior (see line 437-444)
 		final Runnable createElementFromSelection = () -> {
 			final IStructuredSelection selection = treeViewer.getStructuredSelection();
 			if (!selection.isEmpty() && selection.getFirstElement() instanceof TypeEntry) {
@@ -719,33 +826,22 @@ public class NewInstanceCellEditor extends TextCellEditor {
 			}
 		};
 
-		// Single-click: Create element (same behavior as Enter key)
 		treeViewer.getTree().addListener(SWT.MouseDown, event -> {
-			// Only handle left mouse button (button 1), ignore right-click (button 3)
 			if (event.button == 1) {
-				// Get item at click position to validate it's not empty space
 				final org.eclipse.swt.widgets.TreeItem item = treeViewer.getTree().getItem(new Point(event.x, event.y));
 
-				// Only proceed if clicking on an actual TypeEntry item
 				if (item != null && item.getData() instanceof TypeEntry) {
 					createElementFromSelection.run();
 				}
 			}
 		});
 
-		// Double-click: Same behavior (for users who prefer double-click)
 		treeViewer.getTree().addListener(SWT.MouseDoubleClick, event -> {
-			// The first click already created the element via MouseDown
-			// This is redundant but some users may expect double-click behavior
-			// We check selectedEntry to avoid creating twice on double-click
 			if (selectedEntry != null) {
-				// Already created by first click, but doesn't hurt to call again
 				fireApplyEditorValue();
 			}
 		});
-		// ═══════════════════════════════════════════════════════════════
-		// NEW: Add context menu for favorites management
-		// ═══════════════════════════════════════════════════════════════
+
 		addContextMenu(treeViewer);
 	}
 
@@ -756,14 +852,6 @@ public class NewInstanceCellEditor extends TextCellEditor {
 
 	/**
 	 * Creates the "All Categories" section matching the palette structure.
-	 * Organizes types into a 2-level hierarchy: - Standard Libraries (parent) -
-	 * convert, core, events, iec61131-3, io, net, powerlink, etc. (children) - out
-	 * (if exists)
-	 *
-	 * Package naming rules (matching palette): - eclipse4diac::xxx -> Standard
-	 * Libraries > xxx - iec61131::xxx -> Standard Libraries > iec61131-3 > xxx -
-	 * iec61499::xxx -> Standard Libraries > xxx (treated same as eclipse4diac) -
-	 * xxx (no prefix) -> xxx (top level, e.g., "out")
 	 */
 	private TypeSection createAllCategoriesSection() {
 		final TypeSection allCategories = new TypeSection("All Categories");
@@ -777,22 +865,14 @@ public class NewInstanceCellEditor extends TextCellEditor {
 			return allCategories;
 		}
 
-		// Create the "Standard Libraries" parent section
 		final TypeSection standardLibraries = new TypeSection("Standard Libraries");
-
-		// Map to hold categories under Standard Libraries
-		// Key: category name (e.g., "convert", "core", "events")
-		// Value: Map of subcategories to their type lists
 		final Map<String, Map<String, List<TypeEntry>>> standardLibsCategories = new TreeMap<>();
-
-		// Map for other top-level categories (e.g., "out")
 		final Map<String, Map<String, List<TypeEntry>>> otherCategories = new TreeMap<>();
 
 		for (final FBTypeEntry entry : typeLib.getFbTypes()) {
 			final String fullPackageName = PackageNameHelper.extractPackageName(entry.getFullTypeName());
 
 			if (fullPackageName == null || fullPackageName.isEmpty()) {
-				// No package - add to a special "(no package)" section at top level
 				otherCategories.computeIfAbsent("(no package)", k -> new TreeMap<>())
 						.computeIfAbsent("", k -> new ArrayList<>()).add(entry);
 				continue;
@@ -800,52 +880,41 @@ public class NewInstanceCellEditor extends TextCellEditor {
 
 			final String[] parts = fullPackageName.split(PackageNameHelper.PACKAGE_NAME_DELIMITER);
 
-			// Determine the target category structure
-			// Handle packages that should go under Standard Libraries
 			if (parts[0].equals("eclipse4diac") || parts[0].equals("iec61131") || parts[0].equals("iec61499")
 					|| parts[0].equals("powerlink")) {
 				String mainCategory;
 				String subCategory;
 
 				if (parts[0].equals("eclipse4diac")) {
-					// eclipse4diac::xxx -> Standard Libraries > xxx
-					// eclipse4diac::io::ads -> Standard Libraries > io > ads
 					if (parts.length < 2) {
-						continue; // Skip malformed package
+						continue;
 					}
-					mainCategory = parts[1]; // e.g., "convert", "io", "events"
+					mainCategory = parts[1];
 					subCategory = parts.length > 2
 							? String.join("/", java.util.Arrays.copyOfRange(parts, 2, parts.length))
 							: "";
 				} else if (parts[0].equals("iec61131")) {
-					// iec61131::xxx -> Standard Libraries > iec61131-3 > xxx
-					// iec61131::events::E_CYCLE -> Standard Libraries > iec61131-3 > events >
-					// E_CYCLE
 					mainCategory = "iec61131-3";
 					subCategory = parts.length > 1
 							? String.join("/", java.util.Arrays.copyOfRange(parts, 1, parts.length))
 							: "";
 				} else if (parts[0].equals("powerlink")) {
-					// powerlink::xxx -> Standard Libraries > powerlink > xxx
 					mainCategory = "powerlink";
 					subCategory = parts.length > 1
 							? String.join("/", java.util.Arrays.copyOfRange(parts, 1, parts.length))
 							: "";
-				} else // iec61499::xxx -> Standard Libraries > xxx (treat same as eclipse4diac)
-				// The palette treats iec61499 packages the same as eclipse4diac packages
-				if (parts.length >= 2) {
-					mainCategory = parts[1]; // e.g., "events", "net"
+				} else if (parts.length >= 2) {
+					mainCategory = parts[1];
 					subCategory = parts.length > 2
 							? String.join("/", java.util.Arrays.copyOfRange(parts, 2, parts.length))
 							: "";
 				} else {
-					continue; // Skip malformed package
+					continue;
 				}
 
 				standardLibsCategories.computeIfAbsent(mainCategory, k -> new TreeMap<>())
 						.computeIfAbsent(subCategory, k -> new ArrayList<>()).add(entry);
 			} else {
-				// Other packages (e.g., "out") -> top level
 				final String mainCategory = parts[0];
 				final String subCategory = parts.length > 1
 						? String.join("/", java.util.Arrays.copyOfRange(parts, 1, parts.length))
@@ -856,7 +925,6 @@ public class NewInstanceCellEditor extends TextCellEditor {
 			}
 		}
 
-		// Build Standard Libraries hierarchy
 		for (final Map.Entry<String, Map<String, List<TypeEntry>>> categoryEntry : standardLibsCategories.entrySet()) {
 			final String categoryName = categoryEntry.getKey();
 			final Map<String, List<TypeEntry>> subCategories = categoryEntry.getValue();
@@ -864,26 +932,22 @@ public class NewInstanceCellEditor extends TextCellEditor {
 			final TypeSection categorySection = new TypeSection(categoryName);
 
 			if (subCategories.size() == 1 && subCategories.containsKey("")) {
-				// No subcategories - add types directly to this category
 				final List<TypeEntry> types = subCategories.get("");
 				types.sort(Comparator.comparing(TypeEntry::getTypeName));
 				for (final TypeEntry type : types) {
 					categorySection.addEntry(type);
 				}
 			} else {
-				// Has subcategories - create nested structure
 				for (final Map.Entry<String, List<TypeEntry>> subEntry : subCategories.entrySet()) {
 					final String subCategoryName = subEntry.getKey();
 					final List<TypeEntry> types = subEntry.getValue();
 					types.sort(Comparator.comparing(TypeEntry::getTypeName));
 
 					if (subCategoryName.isEmpty()) {
-						// Types directly in this category (no subcategory)
 						for (final TypeEntry type : types) {
 							categorySection.addEntry(type);
 						}
 					} else {
-						// Create subcategory section
 						final TypeSection subCategorySection = new TypeSection(subCategoryName, types);
 						categorySection.addChildSection(subCategorySection);
 					}
@@ -893,12 +957,10 @@ public class NewInstanceCellEditor extends TextCellEditor {
 			standardLibraries.addChildSection(categorySection);
 		}
 
-		// Add Standard Libraries to root if it has content
 		if (standardLibraries.hasChildren()) {
 			allCategories.addChildSection(standardLibraries);
 		}
 
-		// Build other top-level categories (e.g., "out")
 		for (final Map.Entry<String, Map<String, List<TypeEntry>>> categoryEntry : otherCategories.entrySet()) {
 			final String categoryName = categoryEntry.getKey();
 			final Map<String, List<TypeEntry>> subCategories = categoryEntry.getValue();
@@ -906,14 +968,12 @@ public class NewInstanceCellEditor extends TextCellEditor {
 			final TypeSection categorySection = new TypeSection(categoryName);
 
 			if (subCategories.size() == 1 && subCategories.containsKey("")) {
-				// No subcategories - add types directly
 				final List<TypeEntry> types = subCategories.get("");
 				types.sort(Comparator.comparing(TypeEntry::getTypeName));
 				for (final TypeEntry type : types) {
 					categorySection.addEntry(type);
 				}
 			} else {
-				// Has subcategories
 				for (final Map.Entry<String, List<TypeEntry>> subEntry : subCategories.entrySet()) {
 					final String subCategoryName = subEntry.getKey();
 					final List<TypeEntry> types = subEntry.getValue();
