@@ -98,6 +98,7 @@ public class NewInstanceCellEditor extends TextCellEditor {
 	// ════════════════════════════════════════════════════════════════
 	private Label chainModeIndicator;
 	private Composite chainModeBar;
+	private boolean ignoreNextFocusLost = false; // Prevent immediate close when triggered programmatically
 
 	public NewInstanceCellEditor() {
 	}
@@ -263,6 +264,15 @@ public class NewInstanceCellEditor extends TextCellEditor {
 		}
 	}
 
+	/**
+	 * Set flag to ignore the next focus lost event. This is used when the editor is
+	 * triggered programmatically in chain mode to prevent immediate closing.
+	 */
+	public void setIgnoreNextFocusLost(final boolean ignore) {
+		this.ignoreNextFocusLost = ignore;
+		System.out.println("[NewInstanceCellEditor] setIgnoreNextFocusLost: " + ignore);
+	}
+
 	public Text getText() {
 		return text;
 	}
@@ -270,6 +280,23 @@ public class NewInstanceCellEditor extends TextCellEditor {
 	@Override
 	public void focusLost() {
 		System.out.println("[NewInstanceCellEditor] focusLost called");
+
+		// If we should ignore this focus lost (programmatic trigger in chain mode)
+		if (ignoreNextFocusLost) {
+			System.out.println("[NewInstanceCellEditor] Ignoring focus lost - programmatic trigger");
+			ignoreNextFocusLost = false;
+
+			// Force focus back to the text control
+			if (textControl != null && !textControl.isDisposed()) {
+				org.eclipse.swt.widgets.Display.getDefault().asyncExec(() -> {
+					if (!textControl.isDisposed()) {
+						textControl.setFocus();
+					}
+				});
+			}
+			return;
+		}
+
 		if (!insideAnyEditorArea()) {
 			System.out.println("[NewInstanceCellEditor] Focus lost outside editor - cancelling");
 			// when we loose focus we fire cancel, so that the entered text is not applied

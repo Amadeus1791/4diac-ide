@@ -57,12 +57,11 @@ public class FBEditPart extends AbstractBlockFBNElementEditPart {
 	@Override
 	public void performRequest(final Request request) {
 		// Check for Shift+Click to activate chain mode
-		if (request instanceof final org.eclipse.gef.requests.SelectionRequest selRequest) {
-			if (selRequest.isShiftKeyPressed()) {
-				System.out.println("[FBEditPart] Shift+Click detected on: " + getModel().getName());
-				handleShiftClickChainMode();
-				return; // Don't call super - we handled it
-			}
+		if ((request instanceof final org.eclipse.gef.requests.SelectionRequest selRequest)
+				&& selRequest.isShiftKeyPressed()) {
+			System.out.println("[FBEditPart] Shift+Click detected on: " + getModel().getName());
+			handleShiftClickChainMode();
+			return; // Don't call super - we handled it
 		}
 
 		if (request.getType().equals(RequestConstants.REQ_OPEN) && getModel() != null
@@ -105,6 +104,57 @@ public class FBEditPart extends AbstractBlockFBNElementEditPart {
 		refresh();
 
 		System.out.println("[FBEditPart] Chain mode activated!");
+
+		// ⭐ NEW: Automatically open the popup at the calculated position
+		triggerChainPopup();
+	}
+
+	/**
+	 * Trigger the direct edit popup at the calculated chain position. This opens
+	 * the type selection dialog where the next FB should be placed.
+	 */
+	private void triggerChainPopup() {
+		System.out.println("[FBEditPart] triggerChainPopup called");
+
+		// Get the bounds of the current FB's figure (screen coordinates)
+		final org.eclipse.draw2d.geometry.Rectangle bounds = getFigure().getBounds().getCopy();
+
+		// Calculate next position based on figure bounds (150px spacing to the right)
+		final org.eclipse.draw2d.geometry.Point nextPosition = new org.eclipse.draw2d.geometry.Point(
+				bounds.x + bounds.width + 150, bounds.y);
+
+		// Convert to absolute coordinates
+		getFigure().translateToAbsolute(nextPosition);
+
+		System.out.println("[FBEditPart] Position from figure bounds: " + nextPosition);
+
+		// Get the parent network edit part
+		final org.eclipse.gef.EditPart parent = getParent();
+		if (!(parent instanceof final org.eclipse.fordiac.ide.application.editparts.FBNetworkEditPart networkEditPart)) {
+			System.out.println("[FBEditPart] ERROR: Parent is not FBNetworkEditPart");
+			return;
+		}
+
+		// Use timerExec with delay to ensure UI is fully ready
+		org.eclipse.swt.widgets.Display.getDefault().timerExec(100, () -> {
+			System.out.println("[FBEditPart] Timer execution - triggering direct edit");
+
+			// Get the direct edit policy directly
+			final org.eclipse.gef.EditPolicy policy = networkEditPart
+					.getEditPolicy(org.eclipse.gef.EditPolicy.DIRECT_EDIT_ROLE);
+
+			if (policy instanceof final org.eclipse.fordiac.ide.application.policies.AbstractCreateInstanceDirectEditPolicy createPolicy) {
+				// Create a selection request at the calculated position
+				final org.eclipse.gef.requests.SelectionRequest request = new org.eclipse.gef.requests.SelectionRequest();
+				request.setType(org.eclipse.gef.RequestConstants.REQ_DIRECT_EDIT);
+				request.setLocation(nextPosition);
+
+				System.out.println("[FBEditPart] Calling performDirectEdit at position: " + nextPosition);
+				createPolicy.performDirectEdit(request);
+			} else {
+				System.out.println("[FBEditPart] ERROR: Could not get direct edit policy");
+			}
+		});
 	}
 
 }

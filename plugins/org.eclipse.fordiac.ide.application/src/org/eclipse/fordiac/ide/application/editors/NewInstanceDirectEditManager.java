@@ -35,6 +35,7 @@ import org.eclipse.fordiac.ide.model.libraryElement.FBNetworkElement;
 import org.eclipse.fordiac.ide.model.libraryElement.IInterfaceElement;
 import org.eclipse.fordiac.ide.model.libraryElement.VarDeclaration;
 import org.eclipse.fordiac.ide.model.typelibrary.TypeLibrary;
+import org.eclipse.gef.EditPart;
 import org.eclipse.gef.EditPartViewer;
 import org.eclipse.gef.GraphicalEditPart;
 import org.eclipse.gef.GraphicalViewer;
@@ -109,7 +110,19 @@ public class NewInstanceDirectEditManager extends TextDirectEditManager {
 	@Override
 	public void show() {
 		initialValue = null;
+
+		// If in chain mode and triggered programmatically, ignore the first focus lost
+		final ChainModeManager chainManager = ChainModeManager.getInstance();
+		if (chainManager.isChainModeActive()) {
+			System.out.println("[DirectEditManager] Chain mode active - will ignore first focus lost");
+		}
+
 		super.show();
+
+		// Set the flag after show() to prevent immediate close
+		if (chainManager.isChainModeActive()) {
+			getCellEditor().setIgnoreNextFocusLost(true);
+		}
 	}
 
 	public void show(final String initialValue) {
@@ -326,6 +339,12 @@ public class NewInstanceDirectEditManager extends TextDirectEditManager {
 				chainManager.updateSourcePin(newOutputPin);
 				System.out.println("[DirectEditManager] Next source pin: " + newOutputPin.getName());
 			}
+
+			// ⭐ NEW: Auto-reopen popup for next element in chain mode
+			if (chainManager.isChainModeActive()) {
+				System.out.println("[DirectEditManager] Chain mode still active - reopening popup");
+				reopenPopupForNextElement();
+			}
 		}
 
 		// Clear state after success or failure
@@ -389,6 +408,60 @@ public class NewInstanceDirectEditManager extends TextDirectEditManager {
 		}
 
 		return compatible;
+	}
+
+	/**
+	 * Reopen the popup for the next element in chain mode. Called after
+	 * successfully creating and connecting a new FB in chain mode.
+	 */
+	private void reopenPopupForNextElement() {
+		System.out.println("[DirectEditManager] reopenPopupForNextElement called");
+
+		final ChainModeManager chainManager = ChainModeManager.getInstance();
+		if (!chainManager.isChainModeActive()) {
+			System.out.println("[DirectEditManager] Chain mode not active, not reopening");
+			return;
+		}
+
+		// Get the last FB added to the chain to calculate position from its figure
+		final FBNetworkElement lastFB = chainManager.getChainSourceFB();
+		if (lastFB == null) {
+			System.out.println("[DirectEditManager] No source FB, cannot reopen");
+			return;
+		}
+
+		// We need to get the EditPart for the last FB to access its figure bounds
+		// Use the viewer to find the edit part
+		final GraphicalViewer viewer = (GraphicalViewer) getEditPart().getViewer();
+		final EditPart lastFBEditPart = viewer.getEditPartRegistry().get(lastFB);
+
+		if (lastFBEditPart instanceof final GraphicalEditPart graphicalEP) {
+			final org.eclipse.draw2d.geometry.Rectangle bounds = graphicalEP.getFigure().getBounds().getCopy();
+
+			// Calculate next position (150px to the right)
+			final org.eclipse.draw2d.geometry.Point nextPosition = new org.eclipse.draw2d.geometry.Point(
+					bounds.x + bounds.width + 150, bounds.y);
+
+			// Convert to absolute coordinates
+			graphicalEP.getFigure().translateToAbsolute(nextPosition);
+
+			System.out.println("[DirectEditManager] Next position: " + nextPosition);
+
+			// Convert to SWT Point
+			final org.eclipse.swt.graphics.Point swtPoint = new org.eclipse.swt.graphics.Point(nextPosition.x,
+					nextPosition.y);
+
+			// Update the popup position
+			updateRefPosition(swtPoint);
+
+			// Reopen the popup after a short delay to allow the UI to update
+			Display.getDefault().timerExec(150, () -> {
+				System.out.println("[DirectEditManager] Showing popup at: " + swtPoint);
+				show(); // This will automatically set ignoreNextFocusLost because chain mode is active
+			});
+		} else {
+			System.out.println("[DirectEditManager] Could not find EditPart for last FB");
+		}
 	}
 
 	/**

@@ -21,7 +21,7 @@ import org.eclipse.fordiac.ide.model.libraryElement.IInterfaceElement;
 /**
  * Manages the chain creation mode state where users can quickly create and
  * connect multiple function blocks in sequence.
- * 
+ *
  * Chain mode is activated by Shift+Click on a placed FB and allows rapid
  * sequential element creation without repeated modal dialogs.
  */
@@ -33,6 +33,10 @@ public class ChainModeManager {
 	private FBNetworkElement chainSourceFB;
 	private IInterfaceElement chainSourcePin;
 	private final List<FBNetworkElement> chainElements = new ArrayList<>();
+
+	// Position tracking for auto-placement
+	private org.eclipse.draw2d.geometry.Point nextElementPosition;
+	private static final int HORIZONTAL_SPACING = 150; // Spacing between FBs in pixels
 
 	private ChainModeManager() {
 		System.out.println("[ChainModeManager] Instance created");
@@ -67,6 +71,9 @@ public class ChainModeManager {
 		this.chainElements.clear();
 		this.chainElements.add(sourceFB);
 
+		// Calculate position for the first chained element
+		calculateNextPosition(sourceFB);
+
 		System.out.println("[ChainModeManager] Chain mode activated");
 	}
 
@@ -96,14 +103,16 @@ public class ChainModeManager {
 			return;
 		}
 
-		System.out.println("[ChainModeManager] Adding element to chain: "
-				+ (newFB != null ? newFB.getName() : "null"));
+		System.out.println("[ChainModeManager] Adding element to chain: " + (newFB != null ? newFB.getName() : "null"));
 		chainElements.add(newFB);
 
 		// Update source for next iteration (chain from the newly added FB's output)
 		this.chainSourceFB = newFB;
 		// Note: chainSourcePin will be updated by the caller based on the new FB's
 		// interface
+
+		// Recalculate position for the next element
+		calculateNextPosition(newFB);
 
 		System.out.println("[ChainModeManager] Chain now has " + chainElements.size() + " elements");
 	}
@@ -177,5 +186,64 @@ public class ChainModeManager {
 		breadcrumb.append(" > ?");
 
 		return breadcrumb.toString();
+	}
+
+	/**
+	 * Calculate the position for the next element in the chain based on the last
+	 * FB's position. Uses horizontal chaining (elements placed to the right).
+	 *
+	 * @param lastFB the last function block in the chain
+	 */
+	private void calculateNextPosition(final FBNetworkElement lastFB) {
+		if (lastFB == null) {
+			// Fallback position if no source FB
+			nextElementPosition = new org.eclipse.draw2d.geometry.Point(100, 100);
+			System.out.println("[ChainModeManager] No source FB, using fallback position");
+			return;
+		}
+
+		// Get the position of the last FB in the chain
+		// FBNetworkElement implements IPositionableElement which has getPosition()
+		final org.eclipse.fordiac.ide.model.libraryElement.Position position = lastFB.getPosition();
+
+		if (position == null) {
+			// Fallback if position is not set
+			nextElementPosition = new org.eclipse.draw2d.geometry.Point(100, 100);
+			System.out.println("[ChainModeManager] No position found, using fallback");
+			return;
+		}
+
+		final double lastX = position.getX();
+		final double lastY = position.getY();
+
+		System.out.println("[ChainModeManager] Last FB position: x=" + lastX + ", y=" + lastY);
+
+		// Estimate FB width (typical FB is around 120-150px wide)
+		// In a real implementation, you might want to get the actual width from the
+		// figure
+		final int estimatedFBWidth = 120;
+
+		// Calculate next position: place to the right with spacing
+		// Note: 4diac uses a different coordinate system, positions might be in IEC
+		// units
+		// We need to use the same coordinate system
+		nextElementPosition = new org.eclipse.draw2d.geometry.Point(
+				(int) (lastX + estimatedFBWidth + HORIZONTAL_SPACING), (int) lastY);
+
+		System.out.println("[ChainModeManager] Calculated next position: x=" + nextElementPosition.x + ", y="
+				+ nextElementPosition.y + " (using lastX=" + lastX + " + " + (estimatedFBWidth + HORIZONTAL_SPACING)
+				+ ")");
+	}
+
+	/**
+	 * Get the calculated position where the next element should be placed.
+	 *
+	 * @return the position as a Point, or (0,0) if not calculated
+	 */
+	public org.eclipse.draw2d.geometry.Point getNextElementPosition() {
+		if (nextElementPosition != null) {
+			return nextElementPosition.getCopy();
+		}
+		return new org.eclipse.draw2d.geometry.Point(0, 0);
 	}
 }
