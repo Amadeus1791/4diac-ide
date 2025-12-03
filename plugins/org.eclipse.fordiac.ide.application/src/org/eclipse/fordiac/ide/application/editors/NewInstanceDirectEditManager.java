@@ -423,45 +423,61 @@ public class NewInstanceDirectEditManager extends TextDirectEditManager {
 			return;
 		}
 
-		// Get the last FB added to the chain to calculate position from its figure
+		// Get the last FB added to the chain
 		final FBNetworkElement lastFB = chainManager.getChainSourceFB();
 		if (lastFB == null) {
 			System.out.println("[DirectEditManager] No source FB, cannot reopen");
 			return;
 		}
 
-		// We need to get the EditPart for the last FB to access its figure bounds
-		// Use the viewer to find the edit part
-		final GraphicalViewer viewer = (GraphicalViewer) getEditPart().getViewer();
-		final EditPart lastFBEditPart = viewer.getEditPartRegistry().get(lastFB);
+		// IMPORTANT: We need to wait for the figure to be created and laid out
+		// before we can get accurate bounds
+		Display.getDefault().timerExec(50, () -> {
+			// Get fresh EditPart for the last FB
+			final GraphicalViewer viewer = (GraphicalViewer) getEditPart().getViewer();
+			final EditPart lastFBEditPart = viewer.getEditPartRegistry().get(lastFB);
 
-		if (lastFBEditPart instanceof final GraphicalEditPart graphicalEP) {
-			final org.eclipse.draw2d.geometry.Rectangle bounds = graphicalEP.getFigure().getBounds().getCopy();
+			if (lastFBEditPart instanceof final GraphicalEditPart graphicalEP) {
+				// Get FRESH bounds from the figure (this reflects where it was actually placed)
+				final org.eclipse.draw2d.geometry.Rectangle bounds = graphicalEP.getFigure().getBounds().getCopy();
 
-			// Calculate next position (150px to the right)
-			final org.eclipse.draw2d.geometry.Point nextPosition = new org.eclipse.draw2d.geometry.Point(
-					bounds.x + bounds.width + 150, bounds.y);
+				System.out.println("[DirectEditManager] Last FB bounds from figure: " + bounds);
 
-			// Convert to absolute coordinates
-			graphicalEP.getFigure().translateToAbsolute(nextPosition);
+				// Calculate next position based on chain direction
+				final org.eclipse.draw2d.geometry.Point nextPosition;
 
-			System.out.println("[DirectEditManager] Next position: " + nextPosition);
+				if (chainManager.getChainDirection() == ChainModeManager.ChainDirection.VERTICAL) {
+					// Vertical: same X, add spacing to Y
+					nextPosition = new org.eclipse.draw2d.geometry.Point(bounds.x, bounds.y + bounds.height + 100);
+					System.out.println("[DirectEditManager] Calculating VERTICAL position");
+				} else {
+					// Horizontal: add spacing to X, same Y
+					nextPosition = new org.eclipse.draw2d.geometry.Point(bounds.x + bounds.width + 150, bounds.y);
+					System.out.println("[DirectEditManager] Calculating HORIZONTAL position");
+				}
 
-			// Convert to SWT Point
-			final org.eclipse.swt.graphics.Point swtPoint = new org.eclipse.swt.graphics.Point(nextPosition.x,
-					nextPosition.y);
+				// Convert to absolute coordinates
+				graphicalEP.getFigure().translateToAbsolute(nextPosition);
 
-			// Update the popup position
-			updateRefPosition(swtPoint);
+				System.out.println("[DirectEditManager] Next position (" + chainManager.getChainDirection() + "): "
+						+ nextPosition);
 
-			// Reopen the popup after a short delay to allow the UI to update
-			Display.getDefault().timerExec(150, () -> {
-				System.out.println("[DirectEditManager] Showing popup at: " + swtPoint);
-				show(); // This will automatically set ignoreNextFocusLost because chain mode is active
-			});
-		} else {
-			System.out.println("[DirectEditManager] Could not find EditPart for last FB");
-		}
+				// Convert to SWT Point
+				final org.eclipse.swt.graphics.Point swtPoint = new org.eclipse.swt.graphics.Point(nextPosition.x,
+						nextPosition.y);
+
+				// Update the popup position (this also determines where FB will be placed)
+				updateRefPosition(swtPoint);
+
+				// Reopen the popup after a short delay to allow the UI to update
+				Display.getDefault().timerExec(100, () -> {
+					System.out.println("[DirectEditManager] Showing popup at: " + swtPoint);
+					show(); // This will automatically set ignoreNextFocusLost because chain mode is active
+				});
+			} else {
+				System.out.println("[DirectEditManager] Could not find EditPart for last FB");
+			}
+		});
 	}
 
 	/**

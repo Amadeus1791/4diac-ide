@@ -28,6 +28,12 @@ import org.eclipse.fordiac.ide.model.libraryElement.IInterfaceElement;
 public class ChainModeManager {
 	private static ChainModeManager instance;
 
+	// Chain direction enum
+	public enum ChainDirection {
+		HORIZONTAL, // Place elements to the right
+		VERTICAL // Place elements below
+	}
+
 	// Chain mode state
 	private boolean chainModeActive = false;
 	private FBNetworkElement chainSourceFB;
@@ -37,6 +43,10 @@ public class ChainModeManager {
 	// Position tracking for auto-placement
 	private org.eclipse.draw2d.geometry.Point nextElementPosition;
 	private static final int HORIZONTAL_SPACING = 150; // Spacing between FBs in pixels
+	private static final int VERTICAL_SPACING = 100; // Spacing between FBs vertically in pixels
+
+	// Chain direction state
+	private ChainDirection chainDirection = ChainDirection.VERTICAL;
 
 	private ChainModeManager() {
 		System.out.println("[ChainModeManager] Instance created");
@@ -88,6 +98,7 @@ public class ChainModeManager {
 		this.chainSourceFB = null;
 		this.chainSourcePin = null;
 		this.chainElements.clear();
+		this.chainDirection = ChainDirection.HORIZONTAL; // Reset to default
 
 		System.out.println("[ChainModeManager] Chain mode deactivated");
 	}
@@ -190,7 +201,7 @@ public class ChainModeManager {
 
 	/**
 	 * Calculate the position for the next element in the chain based on the last
-	 * FB's position. Uses horizontal chaining (elements placed to the right).
+	 * FB's position. Supports both horizontal (right) and vertical (down) chaining.
 	 *
 	 * @param lastFB the last function block in the chain
 	 */
@@ -218,21 +229,26 @@ public class ChainModeManager {
 
 		System.out.println("[ChainModeManager] Last FB position: x=" + lastX + ", y=" + lastY);
 
-		// Estimate FB width (typical FB is around 120-150px wide)
-		// In a real implementation, you might want to get the actual width from the
-		// figure
+		// Estimate FB dimensions (typical FB is around 120-150px wide, 80-100px tall)
 		final int estimatedFBWidth = 120;
+		final int estimatedFBHeight = 80;
 
-		// Calculate next position: place to the right with spacing
-		// Note: 4diac uses a different coordinate system, positions might be in IEC
-		// units
-		// We need to use the same coordinate system
-		nextElementPosition = new org.eclipse.draw2d.geometry.Point(
-				(int) (lastX + estimatedFBWidth + HORIZONTAL_SPACING), (int) lastY);
+		// Calculate next position based on chain direction
+		if (chainDirection == ChainDirection.HORIZONTAL) {
+			// Horizontal: place to the right with spacing
+			nextElementPosition = new org.eclipse.draw2d.geometry.Point(
+					(int) (lastX + estimatedFBWidth + HORIZONTAL_SPACING), (int) lastY);
 
-		System.out.println("[ChainModeManager] Calculated next position: x=" + nextElementPosition.x + ", y="
-				+ nextElementPosition.y + " (using lastX=" + lastX + " + " + (estimatedFBWidth + HORIZONTAL_SPACING)
-				+ ")");
+			System.out.println("[ChainModeManager] Calculated next HORIZONTAL position: x=" + nextElementPosition.x
+					+ ", y=" + nextElementPosition.y);
+		} else {
+			// Vertical: place below with spacing
+			nextElementPosition = new org.eclipse.draw2d.geometry.Point((int) lastX,
+					(int) (lastY + estimatedFBHeight + VERTICAL_SPACING));
+
+			System.out.println("[ChainModeManager] Calculated next VERTICAL position: x=" + nextElementPosition.x
+					+ ", y=" + nextElementPosition.y);
+		}
 	}
 
 	/**
@@ -245,5 +261,44 @@ public class ChainModeManager {
 			return nextElementPosition.getCopy();
 		}
 		return new org.eclipse.draw2d.geometry.Point(0, 0);
+	}
+
+	/**
+	 * Set the chain direction (horizontal or vertical).
+	 *
+	 * @param direction the new chain direction
+	 */
+	public void setChainDirection(final ChainDirection direction) {
+		System.out.println("[ChainModeManager] Setting chain direction to: " + direction);
+		this.chainDirection = direction;
+
+		// Recalculate position if we're in active chain mode
+		if (chainModeActive && chainSourceFB != null) {
+			calculateNextPosition(chainSourceFB);
+		}
+	}
+
+	/**
+	 * Get the current chain direction.
+	 *
+	 * @return the current chain direction
+	 */
+	public ChainDirection getChainDirection() {
+		return chainDirection;
+	}
+
+	/**
+	 * Toggle between horizontal and vertical chaining.
+	 */
+	public void toggleChainDirection() {
+		chainDirection = (chainDirection == ChainDirection.HORIZONTAL) ? ChainDirection.VERTICAL
+				: ChainDirection.HORIZONTAL;
+
+		System.out.println("[ChainModeManager] Toggled chain direction to: " + chainDirection);
+
+		// Recalculate position if we're in active chain mode
+		if (chainModeActive && chainSourceFB != null) {
+			calculateNextPosition(chainSourceFB);
+		}
 	}
 }

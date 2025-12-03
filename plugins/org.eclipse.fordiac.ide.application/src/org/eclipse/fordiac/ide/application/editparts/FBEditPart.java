@@ -116,17 +116,37 @@ public class FBEditPart extends AbstractBlockFBNElementEditPart {
 	private void triggerChainPopup() {
 		System.out.println("[FBEditPart] triggerChainPopup called");
 
-		// Get the bounds of the current FB's figure (screen coordinates)
+		// Get the chain manager
+		final org.eclipse.fordiac.ide.gef.tools.ChainModeManager chainManager = org.eclipse.fordiac.ide.gef.tools.ChainModeManager
+				.getInstance();
+
+		// Use the ChainModeManager's calculated position (respects chain direction)
+		final org.eclipse.draw2d.geometry.Point modelPosition = chainManager.getNextElementPosition();
+
+		System.out.println("[FBEditPart] Model position from ChainModeManager: " + modelPosition);
+
+		// Get the bounds of the current FB's figure for reference
 		final org.eclipse.draw2d.geometry.Rectangle bounds = getFigure().getBounds().getCopy();
 
-		// Calculate next position based on figure bounds (150px spacing to the right)
-		final org.eclipse.draw2d.geometry.Point nextPosition = new org.eclipse.draw2d.geometry.Point(
-				bounds.x + bounds.width + 150, bounds.y);
+		// Calculate screen position based on model coordinates
+		// We need to convert from model coordinates to screen coordinates
+		// For now, we'll use a simple offset from the current figure bounds
+		final org.eclipse.draw2d.geometry.Point nextPosition;
+
+		if (chainManager
+				.getChainDirection() == org.eclipse.fordiac.ide.gef.tools.ChainModeManager.ChainDirection.VERTICAL) {
+			// Vertical: same X, add spacing to Y
+			nextPosition = new org.eclipse.draw2d.geometry.Point(bounds.x, bounds.y + bounds.height + 100);
+		} else {
+			// Horizontal: add spacing to X, same Y
+			nextPosition = new org.eclipse.draw2d.geometry.Point(bounds.x + bounds.width + 150, bounds.y);
+		}
 
 		// Convert to absolute coordinates
 		getFigure().translateToAbsolute(nextPosition);
 
-		System.out.println("[FBEditPart] Position from figure bounds: " + nextPosition);
+		System.out.println(
+				"[FBEditPart] Position from figure bounds (" + chainManager.getChainDirection() + "): " + nextPosition);
 
 		// Get the parent network edit part
 		final org.eclipse.gef.EditPart parent = getParent();
