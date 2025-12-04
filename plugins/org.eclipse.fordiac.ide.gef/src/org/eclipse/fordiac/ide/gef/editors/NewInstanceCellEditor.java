@@ -98,6 +98,7 @@ public class NewInstanceCellEditor extends TextCellEditor {
 	// ════════════════════════════════════════════════════════════════
 	private Label chainModeIndicator;
 	private Composite chainModeBar;
+	private org.eclipse.swt.widgets.Button chainDirectionToggle;
 	private boolean ignoreNextFocusLost = false; // Prevent immediate close when triggered programmatically
 
 	public NewInstanceCellEditor() {
@@ -209,7 +210,7 @@ public class NewInstanceCellEditor extends TextCellEditor {
 		System.out.println("[NewInstanceCellEditor] Creating chain mode bar");
 
 		chainModeBar = new Composite(parent, SWT.NONE);
-		chainModeBar.setLayout(new GridLayout(1, false));
+		chainModeBar.setLayout(new GridLayout(2, false)); // Changed to 2 columns for label + button
 		chainModeBar.setLayoutData(new GridData(SWT.FILL, SWT.TOP, true, false));
 		chainModeBar.setVisible(false); // Hidden by default
 
@@ -219,6 +220,35 @@ public class NewInstanceCellEditor extends TextCellEditor {
 
 		// Style the indicator
 		chainModeIndicator.setForeground(parent.getDisplay().getSystemColor(SWT.COLOR_DARK_GREEN));
+
+		// Add direction toggle button
+		chainDirectionToggle = new org.eclipse.swt.widgets.Button(chainModeBar, SWT.PUSH);
+		chainDirectionToggle.setLayoutData(new GridData(SWT.RIGHT, SWT.CENTER, false, false));
+		chainDirectionToggle.setText("→"); // Default horizontal
+		chainDirectionToggle.setToolTipText("Toggle chain direction (V)");
+
+		// Add click listener for toggle
+		chainDirectionToggle.addListener(SWT.Selection, event -> {
+			final ChainModeManager chainManager = ChainModeManager.getInstance();
+			if (chainManager.isChainModeActive()) {
+				chainManager.toggleChainDirection();
+				System.out.println("[NewInstanceCellEditor] Toggle button clicked - Direction: "
+						+ chainManager.getChainDirection());
+				updateChainModeUI();
+
+				// Reposition the popup based on new direction
+				repositionPopupForDirection();
+
+				// Restore focus to text control after button click
+				if (textControl != null && !textControl.isDisposed()) {
+					org.eclipse.swt.widgets.Display.getDefault().asyncExec(() -> {
+						if (!textControl.isDisposed()) {
+							textControl.setFocus();
+						}
+					});
+				}
+			}
+		});
 	}
 
 	/**
@@ -239,6 +269,18 @@ public class NewInstanceCellEditor extends TextCellEditor {
 			final String breadcrumb = chainManager.getChainBreadcrumb();
 			chainModeIndicator.setText("🔗 Chain Mode: " + breadcrumb);
 			chainModeBar.setVisible(true);
+
+			// Update direction toggle button
+			if (chainDirectionToggle != null && !chainDirectionToggle.isDisposed()) {
+				final ChainModeManager.ChainDirection direction = chainManager.getChainDirection();
+				if (direction == ChainModeManager.ChainDirection.VERTICAL) {
+					chainDirectionToggle.setText("↓");
+					chainDirectionToggle.setToolTipText("Vertical chaining (Press V to toggle)");
+				} else {
+					chainDirectionToggle.setText("→");
+					chainDirectionToggle.setToolTipText("Horizontal chaining (Press V to toggle)");
+				}
+			}
 
 			// Update search placeholder
 			if (textControl != null && !textControl.isDisposed()) {
@@ -261,6 +303,68 @@ public class NewInstanceCellEditor extends TextCellEditor {
 		// Force layout update
 		if (container != null && !container.isDisposed()) {
 			container.layout(true, true);
+		}
+	}
+
+	/**
+	 * Reposition the popup shell based on the current chain direction. This is
+	 * called when the user toggles the direction to ensure the FB will be placed at
+	 * the correct position.
+	 *
+	 * Since DirectEditRequest location is set when popup opens and can't be
+	 * changed, we need to close and reopen the popup at the new position.
+	 */
+	private void repositionPopupForDirection() {
+		if (popupShell == null || popupShell.isDisposed() || container == null || container.isDisposed()) {
+			return;
+		}
+
+		final ChainModeManager chainManager = ChainModeManager.getInstance();
+		if (!chainManager.isChainModeActive()) {
+			return;
+		}
+
+		System.out.println(
+				"[NewInstanceCellEditor] Repositioning popup for direction: " + chainManager.getChainDirection());
+
+		// Get current container bounds
+		final Rectangle currentBounds = container.getBounds();
+		System.out.println("[NewInstanceCellEditor] Current container bounds: " + currentBounds);
+
+		// Calculate the new position based on direction
+		int newX, newY;
+
+		if (chainManager.getChainDirection() == ChainModeManager.ChainDirection.VERTICAL) {
+			// Switching to vertical: move down and left
+			newX = currentBounds.x - 150;
+			newY = currentBounds.y + 200;
+		} else {
+			// Switching to horizontal: move right and up
+			newX = currentBounds.x + 150;
+			newY = currentBounds.y - 200;
+		}
+
+		System.out.println("[NewInstanceCellEditor] New container position: (" + newX + ", " + newY + ")");
+
+		// Close current popup
+		if (popupShell != null && !popupShell.isDisposed()) {
+			popupShell.setVisible(false);
+		}
+
+		// Update container position
+		container.setBounds(newX, newY, currentBounds.width, currentBounds.height);
+
+		// Reopen popup (this will trigger setBounds which shows popup at new position)
+		if (popupShell != null && !popupShell.isDisposed()) {
+			org.eclipse.swt.widgets.Display.getDefault().asyncExec(() -> {
+				if (popupShell != null && !popupShell.isDisposed()) {
+					popupShell.setVisible(true);
+					// Restore focus to text control
+					if (textControl != null && !textControl.isDisposed()) {
+						textControl.setFocus();
+					}
+				}
+			});
 		}
 	}
 
@@ -362,8 +466,19 @@ public class NewInstanceCellEditor extends TextCellEditor {
 	public boolean insideAnyEditorArea() {
 		final Point cursorLocation = popupShell.getDisplay().getCursorLocation();
 		final Point containerRelativeCursor = container.getParent().toControl(cursorLocation);
-		return container.getBounds().contains(containerRelativeCursor)
+
+		// Check if inside container or popup shell
+		boolean insideEditor = container.getBounds().contains(containerRelativeCursor)
 				|| popupShell.getBounds().contains(cursorLocation);
+
+		// Also check if inside chain mode bar (to prevent focus loss when clicking
+		// toggle button)
+		if (!insideEditor && chainModeBar != null && !chainModeBar.isDisposed()) {
+			final Point chainBarRelativeCursor = chainModeBar.getParent().toControl(cursorLocation);
+			insideEditor = chainModeBar.getBounds().contains(chainBarRelativeCursor);
+		}
+
+		return insideEditor;
 	}
 
 	protected Composite createContainer(final Composite parent) {
@@ -619,6 +734,21 @@ public class NewInstanceCellEditor extends TextCellEditor {
 					treeViewer.setExpandedState(item.getData(), false);
 					event.doit = false;
 				}
+			}
+			break;
+		// ════════════════════════════════════════════════════════════════
+		// CHAIN MODE: Handle 'V' key to toggle chain direction
+		// ════════════════════════════════════════════════════════════════
+		case 'v':
+		case 'V':
+			final ChainModeManager chainManagerV = ChainModeManager.getInstance();
+			if (chainManagerV.isChainModeActive()) {
+				chainManagerV.toggleChainDirection();
+				System.out.println(
+						"[NewInstanceCellEditor] Toggled chain direction to: " + chainManagerV.getChainDirection());
+				updateChainModeUI(); // Update the UI to show new direction
+				repositionPopupForDirection(); // Reposition popup based on new direction
+				event.doit = false; // Prevent the 'v' from being typed in the search box
 			}
 			break;
 		// ════════════════════════════════════════════════════════════════

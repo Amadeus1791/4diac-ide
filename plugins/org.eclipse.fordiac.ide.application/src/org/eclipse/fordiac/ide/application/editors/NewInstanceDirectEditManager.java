@@ -155,10 +155,50 @@ public class NewInstanceDirectEditManager extends TextDirectEditManager {
 		return (NewInstanceCellEditor) super.getCellEditor();
 	}
 
+	private DirectEditRequest cachedDirectEditRequest; // Store for later modification
+
 	@Override
 	protected DirectEditRequest createDirectEditRequest() {
 		final DirectEditRequest directEditRequest = super.createDirectEditRequest();
-		directEditRequest.setLocation(new org.eclipse.draw2d.geometry.Point(getLocator().getRefPoint()));
+		org.eclipse.draw2d.geometry.Point location = new org.eclipse.draw2d.geometry.Point(getLocator().getRefPoint());
+
+		// Check if in chain mode and direction was changed before first placement
+		final ChainModeManager chainManager = ChainModeManager.getInstance();
+		if (chainManager.isChainModeActive() && chainManager.wasDirectionChangedBeforePlacement()) {
+			System.out.println("[DirectEditManager] Direction was changed before placement - recalculating position");
+
+			// Get the source FB to calculate new position
+			final org.eclipse.fordiac.ide.model.libraryElement.FBNetworkElement sourceFB = chainManager
+					.getChainSourceFB();
+			if (sourceFB != null) {
+				// Get the EditPart for the source FB
+				final GraphicalViewer viewer = (GraphicalViewer) getEditPart().getViewer();
+				final EditPart sourceFBEditPart = viewer.getEditPartRegistry().get(sourceFB);
+
+				if (sourceFBEditPart instanceof final GraphicalEditPart graphicalEP) {
+					final org.eclipse.draw2d.geometry.Rectangle bounds = graphicalEP.getFigure().getBounds().getCopy();
+
+					// Calculate position based on current direction
+					final org.eclipse.draw2d.geometry.Point newPosition;
+					if (chainManager.getChainDirection() == ChainModeManager.ChainDirection.VERTICAL) {
+						newPosition = new org.eclipse.draw2d.geometry.Point(bounds.x, bounds.y + bounds.height + 100);
+						System.out.println("[DirectEditManager] Recalculated VERTICAL position");
+					} else {
+						newPosition = new org.eclipse.draw2d.geometry.Point(bounds.x + bounds.width + 150, bounds.y);
+						System.out.println("[DirectEditManager] Recalculated HORIZONTAL position");
+					}
+
+					// Convert to absolute coordinates
+					graphicalEP.getFigure().translateToAbsolute(newPosition);
+					location = newPosition;
+
+					System.out.println("[DirectEditManager] Using recalculated position: " + location);
+				}
+			}
+		}
+
+		directEditRequest.setLocation(location);
+		cachedDirectEditRequest = directEditRequest; // Store for potential modification in commit
 		return directEditRequest;
 	}
 
@@ -191,6 +231,50 @@ public class NewInstanceDirectEditManager extends TextDirectEditManager {
 		System.out.println("[DirectEditManager] commit() called");
 		final ChainModeManager chainManager = ChainModeManager.getInstance();
 		System.out.println("[DirectEditManager] Chain mode active? " + chainManager.isChainModeActive());
+
+		// Check if direction was changed before first placement and update the request
+		// location
+		if (chainManager.isChainModeActive() && chainManager.wasDirectionChangedBeforePlacement()
+				&& cachedDirectEditRequest != null) {
+			System.out.println(
+					"[DirectEditManager] Direction was changed before placement - updating DirectEditRequest location in commit");
+
+			// Get the source FB to calculate new position
+			final org.eclipse.fordiac.ide.model.libraryElement.FBNetworkElement sourceFB = chainManager
+					.getChainSourceFB();
+			if (sourceFB != null) {
+				// Get the EditPart for the source FB
+				final GraphicalViewer viewer = (GraphicalViewer) getEditPart().getViewer();
+				final EditPart sourceFBEditPart = viewer.getEditPartRegistry().get(sourceFB);
+
+				if (sourceFBEditPart instanceof final GraphicalEditPart graphicalEP) {
+					final org.eclipse.draw2d.geometry.Rectangle bounds = graphicalEP.getFigure().getBounds().getCopy();
+
+					// Calculate position based on current direction
+					final org.eclipse.draw2d.geometry.Point newPosition;
+					if (chainManager.getChainDirection() == ChainModeManager.ChainDirection.VERTICAL) {
+						newPosition = new org.eclipse.draw2d.geometry.Point(bounds.x, bounds.y + bounds.height + 100);
+						System.out.println("[DirectEditManager] Recalculated VERTICAL position for DirectEditRequest");
+					} else {
+						newPosition = new org.eclipse.draw2d.geometry.Point(bounds.x + bounds.width + 150, bounds.y);
+						System.out
+								.println("[DirectEditManager] Recalculated HORIZONTAL position for DirectEditRequest");
+					}
+
+					// Convert to absolute coordinates
+					graphicalEP.getFigure().translateToAbsolute(newPosition);
+
+					System.out.println("[DirectEditManager] Updating DirectEditRequest location to: " + newPosition);
+
+					// Update the DirectEditRequest's location directly
+					cachedDirectEditRequest.setLocation(newPosition);
+
+					// Also update the locator for consistency
+					final Point swtPoint = new Point(newPosition.x, newPosition.y);
+					updateRefPosition(swtPoint);
+				}
+			}
+		}
 
 		if (chainManager.isChainModeActive()) {
 			System.out.println("[DirectEditManager] Setting up pending connection");

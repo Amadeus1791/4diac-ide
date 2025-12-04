@@ -46,7 +46,9 @@ public class ChainModeManager {
 	private static final int VERTICAL_SPACING = 100; // Spacing between FBs vertically in pixels
 
 	// Chain direction state
-	private ChainDirection chainDirection = ChainDirection.VERTICAL;
+	private ChainDirection chainDirection = ChainDirection.HORIZONTAL;
+	private boolean directionChangedBeforePlacement = false; // Tracks if direction was toggled before first element
+																// placed
 
 	private ChainModeManager() {
 		System.out.println("[ChainModeManager] Instance created");
@@ -99,6 +101,7 @@ public class ChainModeManager {
 		this.chainSourcePin = null;
 		this.chainElements.clear();
 		this.chainDirection = ChainDirection.HORIZONTAL; // Reset to default
+		this.directionChangedBeforePlacement = false; // Reset flag
 
 		System.out.println("[ChainModeManager] Chain mode deactivated");
 	}
@@ -116,6 +119,12 @@ public class ChainModeManager {
 
 		System.out.println("[ChainModeManager] Adding element to chain: " + (newFB != null ? newFB.getName() : "null"));
 		chainElements.add(newFB);
+
+		// Reset the direction changed flag after first element is placed
+		if (directionChangedBeforePlacement) {
+			System.out.println("[ChainModeManager] Direction change has been applied, resetting flag");
+			directionChangedBeforePlacement = false;
+		}
 
 		// Update source for next iteration (chain from the newly added FB's output)
 		this.chainSourceFB = newFB;
@@ -296,9 +305,26 @@ public class ChainModeManager {
 
 		System.out.println("[ChainModeManager] Toggled chain direction to: " + chainDirection);
 
+		// If we're toggling before the first element is placed (chain size == 1 means
+		// only source FB)
+		if (chainModeActive && chainElements.size() == 1) {
+			directionChangedBeforePlacement = true;
+			System.out.println("[ChainModeManager] Direction changed before first placement - flag set");
+		}
+
 		// Recalculate position if we're in active chain mode
 		if (chainModeActive && chainSourceFB != null) {
 			calculateNextPosition(chainSourceFB);
 		}
+	}
+
+	/**
+	 * Check if direction was changed before placing the first element. This is used
+	 * to determine if we need to recalculate position for the first placement.
+	 *
+	 * @return true if direction was toggled before first element was placed
+	 */
+	public boolean wasDirectionChangedBeforePlacement() {
+		return directionChangedBeforePlacement;
 	}
 }
