@@ -11,15 +11,21 @@
  * Contributors:
  *   Alois Zoitl - initial API and implementation and/or initial documentation
  *               - keep connection draging within canvas bounds
+ *   [Your Name] - Added Ctrl+Drag requirement and visual feedback for drag-to-create
  *******************************************************************************/
 package org.eclipse.fordiac.ide.gef.tools;
 
 import java.util.ArrayList;
 import java.util.List;
 
-import org.eclipse.draw2d.Cursors;
+import org.eclipse.draw2d.ColorConstants;
+import org.eclipse.draw2d.IFigure;
+import org.eclipse.draw2d.Label;
+import org.eclipse.draw2d.RectangleFigure;
+import org.eclipse.draw2d.geometry.Dimension;
 import org.eclipse.draw2d.geometry.Insets;
 import org.eclipse.draw2d.geometry.Point;
+import org.eclipse.draw2d.geometry.Rectangle;
 import org.eclipse.emf.common.util.EList;
 import org.eclipse.fordiac.ide.gef.dialogs.PortSelectionDialog;
 import org.eclipse.fordiac.ide.gef.figures.HideableConnection;
@@ -46,8 +52,10 @@ import org.eclipse.gef.EditPartViewer;
 import org.eclipse.gef.EditPolicy;
 import org.eclipse.gef.GraphicalEditPart;
 import org.eclipse.gef.GraphicalViewer;
+import org.eclipse.gef.LayerConstants;
 import org.eclipse.gef.commands.Command;
 import org.eclipse.gef.commands.CommandStack;
+import org.eclipse.gef.editparts.ScalableFreeformRootEditPart;
 import org.eclipse.gef.requests.CreateConnectionRequest;
 import org.eclipse.gef.requests.SelectionRequest;
 import org.eclipse.gef.tools.ConnectionDragCreationTool;
@@ -55,6 +63,7 @@ import org.eclipse.jface.window.Window;
 import org.eclipse.swt.SWT;
 import org.eclipse.swt.events.MouseEvent;
 import org.eclipse.swt.graphics.Cursor;
+import org.eclipse.swt.graphics.Font;
 import org.eclipse.swt.widgets.Display;
 import org.eclipse.swt.widgets.Shell;
 
@@ -71,13 +80,69 @@ public class FordiacConnectionDragCreationTool extends ConnectionDragCreationToo
 	private Object sourceModel;
 	private Point canvasDropLocation;
 	private org.eclipse.gef.commands.CommandStackEventListener pendingConnectionListener;
+
 	/** Track whether we're currently over empty canvas for cursor feedback */
 	private boolean isOverEmptyCanvas = false;
+
+	// ============================================================================
+	// NEW: Ctrl+Drag State Tracking
+	// ============================================================================
+
+	/** Track whether Ctrl key is currently pressed during drag */
+	private boolean ctrlPressed = false;
+
+	/** Starting location of drag operation (for distance calculation) */
+	private Point dragStartLocation = null;
+
+	/** Whether the drag has exceeded the minimum distance threshold */
+	private boolean hasExceededMinDistance = false;
+
+	/** Minimum drag distance (in pixels) before drag-to-create can activate */
+	private static final int MIN_DRAG_DISTANCE = 20;
+
+	/**
+	 * Cursor to show when drag-to-create mode is active (Ctrl+Drag over empty
+	 * canvas)
+	 */
+	private static Cursor PLUS_CURSOR = null;
+
+	/** Ghost block figure shown during drag-to-create */
+	private IFigure ghostBlockFigure = null;
+	/** Font for ghost block label (reused to avoid memory leak) */
+	private Font ghostLabelFont = null;
+
+	static {
+		try {
+			// Use a distinctive cursor for drag-to-create mode
+			// Option A: Use system hand cursor (most distinctive)
+			PLUS_CURSOR = Display.getDefault().getSystemCursor(SWT.CURSOR_HAND);
+
+			// Option B: Use cross cursor (similar to state machine Ctrl+Drag)
+			// PLUS_CURSOR = Display.getDefault().getSystemCursor(SWT.CURSOR_CROSS);
+
+			// Option C: Create custom cursor from image (requires FordiacImage.ICON_ADD or
+			// similar)
+			// PLUS_CURSOR = new Cursor(Display.getDefault(),
+			// FordiacImage.ICON_ADD.getImageDescriptor().getImageData(), 8, 8);
+		} catch (final Exception e) {
+			System.err.println("Failed to create PLUS_CURSOR: " + e.getMessage());
+			// Fallback to arrow cursor
+			PLUS_CURSOR = Display.getDefault().getSystemCursor(SWT.CURSOR_ARROW);
+		}
+	}
+
+	// ============================================================================
+	// Constructor
+	// ============================================================================
 
 	public FordiacConnectionDragCreationTool() {
 		setDefaultCursor(Display.getDefault().getSystemCursor(SWT.CURSOR_CROSS));
 		setDisabledCursor(Display.getDefault().getSystemCursor(SWT.CURSOR_NO));
 	}
+
+	// ============================================================================
+	// Tool Lifecycle Methods
+	// ============================================================================
 
 	@Override
 	public void deactivate() {
@@ -85,18 +150,19 @@ public class FordiacConnectionDragCreationTool extends ConnectionDragCreationToo
 
 		// Reset cursor feedback state
 		isOverEmptyCanvas = false;
-		// No need to call setCursor() here - calculateCursor() will handle it
 
-		// Clean up drag-to-create state
-		sourceEditPart = null;
-		sourceModel = null;
-		canvasDropLocation = null;
+		// Reset drag-to-create state
+		resetDragToCreateState();
 
 		// Don't clear PendingConnectionManager here - it needs to survive tool
 		// deactivation
 
 		super.deactivate();
 	}
+
+	// ============================================================================
+	// Mouse Event Handlers
+	// ============================================================================
 
 	@Override
 	public void mouseDrag(final MouseEvent me, final EditPartViewer viewer) {
@@ -111,39 +177,6 @@ public class FordiacConnectionDragCreationTool extends ConnectionDragCreationToo
 	}
 
 	@Override
-	protected boolean handleButtonUp(final int button) {
-		// Check if this is a canvas drop (drag from pin to empty canvas)
-		if (sourceModel != null && canvasDropLocation != null) {
-			// Get viewer and cast to GraphicalViewer
-			final EditPartViewer viewer = getCurrentViewer();
-			if (!(viewer instanceof GraphicalViewer)) {
-				// Clean up and fall back to normal behavior
-				sourceEditPart = null;
-				sourceModel = null;
-				canvasDropLocation = null;
-				return false;
-			}
-
-			// Handle the canvas drop with drag-to-create
-			handleCanvasDrop((GraphicalViewer) viewer, sourceEditPart, sourceModel, canvasDropLocation);
-
-			// Clean up
-			sourceEditPart = null;
-			sourceModel = null;
-			canvasDropLocation = null;
-
-			return true;
-		}
-
-		// Normal connection handling
-		sourceEditPart = null;
-		sourceModel = null;
-		canvasDropLocation = null;
-
-		return super.handleButtonUp(button);
-	}
-
-	@Override
 	protected boolean handleButtonDown(final int button) {
 		// Capture the source of the drag operation
 		if (getTargetEditPart() != null) {
@@ -151,7 +184,43 @@ public class FordiacConnectionDragCreationTool extends ConnectionDragCreationToo
 			sourceModel = sourceEditPart.getModel();
 		}
 
+		// Initialize drag tracking for Ctrl+Drag detection
+		dragStartLocation = getLocation().getCopy();
+		hasExceededMinDistance = false;
+
 		return super.handleButtonDown(button);
+	}
+
+	@Override
+	protected boolean handleButtonUp(final int button) {
+		// Hide ghost immediately when mouse released
+		hideGhostBlock();
+		// MODIFIED: Only trigger drag-to-create if ALL conditions met:
+		// 1. Valid source model (pin)
+		// 2. Canvas drop location detected
+		// 3. Ctrl was pressed during drag
+		if (sourceModel != null && canvasDropLocation != null && ctrlPressed) {
+			// Get viewer and cast to GraphicalViewer
+			final EditPartViewer viewer = getCurrentViewer();
+			if (!(viewer instanceof GraphicalViewer)) {
+				// Clean up and fall back to normal behavior
+				resetDragToCreateState();
+				return false;
+			}
+
+			// Handle the canvas drop with drag-to-create
+			handleCanvasDrop((GraphicalViewer) viewer, sourceEditPart, sourceModel, canvasDropLocation);
+
+			// Clean up
+			resetDragToCreateState();
+
+			return true;
+		}
+
+		// Normal connection handling or cancelled drag-to-create
+		resetDragToCreateState();
+
+		return super.handleButtonUp(button);
 	}
 
 	@Override
@@ -165,58 +234,68 @@ public class FordiacConnectionDragCreationTool extends ConnectionDragCreationToo
 
 	@Override
 	protected boolean handleDrag() {
-		// Track the current drag location to detect canvas drops
+		// Get current state
 		final Point currentLocation = getLocation();
 
+		// Check Ctrl key state
+		ctrlPressed = getCurrentInput().isModKeyDown(SWT.MOD1);
+
+		// Calculate drag distance from start point
+		if (dragStartLocation != null && !hasExceededMinDistance) {
+			final double distance = dragStartLocation.getDistance(currentLocation);
+			hasExceededMinDistance = distance >= MIN_DRAG_DISTANCE;
+		}
+
+		// Track the current drag location to detect canvas drops
 		if (sourceModel != null) {
-			// Check if we're over empty canvas (no target edit part with a valid model)
 			final EditPart targetEP = getTargetEditPart();
 
-			if (targetEP == null || targetEP.getModel() instanceof FBNetwork) {
-				// Dragging over empty canvas - potential drag-to-create
+			if (ctrlPressed && hasExceededMinDistance
+					&& (targetEP == null || targetEP.getModel() instanceof FBNetwork)) {
 				canvasDropLocation = currentLocation.getCopy();
 			} else {
-				// Dragging over an element - normal connection behavior
 				canvasDropLocation = null;
 			}
 		}
 
-		return super.handleDrag();
+		// Show/hide ghost block based on drag-to-create state (ADD THIS)
+		if (ctrlPressed && hasExceededMinDistance && canvasDropLocation != null) {
+			System.out.println("Should show ghost"); // DEBUG
+
+			showGhostBlock(currentLocation);
+		} else {
+			hideGhostBlock();
+		}
+
+		// Call parent implementation
+		final boolean result = super.handleDrag();
+
+		// Force cursor update when state changes
+		setCursor(calculateCursor());
+
+		return result;
 	}
 
-//	@Override
-//	protected boolean handleMove() {
-//		// Continue tracking location during move (similar to drag)
-//		final Point currentLocation = getLocation();
-//
-//		if (sourceModel != null) {
-//			final EditPart targetEP = getTargetEditPart();
-//
-//			if (targetEP == null || targetEP.getModel() instanceof FBNetwork) {
-//				canvasDropLocation = currentLocation.getCopy();
-//			} else {
-//				canvasDropLocation = null;
-//			}
-//		}
-//
-//		return super.handleMove();
-//	}
 	@Override
 	protected boolean handleMove() {
 		// Let parent handle normal connection creation behavior
 		final boolean result = super.handleMove();
 
-		// If we're dragging from a source pin, track whether we're over empty canvas
+		// If we're dragging from a source pin, track state for cursor feedback
 		if (sourceEditPart != null && sourceModel instanceof IInterfaceElement) {
 			final Point location = getLocation();
 			final EditPart targetEditPart = getCurrentViewer().findObjectAt(location);
 
-			// Update state (calculateCursor will use this)
+			// Check Ctrl state even during move (for future hover previews)
+			ctrlPressed = getCurrentInput().isModKeyDown(SWT.MOD1);
+
+			// Update empty canvas state
 			final boolean nowOverEmptyCanvas = isOverEmptyCanvas(targetEditPart);
 
 			if (nowOverEmptyCanvas != isOverEmptyCanvas) {
 				isOverEmptyCanvas = nowOverEmptyCanvas;
-				System.out.println("State change: isOverEmptyCanvas = " + isOverEmptyCanvas);
+				// Update cursor
+				setCursor(calculateCursor());
 			}
 		}
 
@@ -224,7 +303,124 @@ public class FordiacConnectionDragCreationTool extends ConnectionDragCreationToo
 	}
 
 	// ============================================================================
-	// STEP 2: ADD calculateCursor() - Return Cursor Based on State
+	// NEW: Helper Method to Reset Drag-to-Create State
+	// ============================================================================
+
+	/**
+	 * Reset all drag-to-create state variables. Called on deactivation, button up,
+	 * or cancellation.
+	 */
+	private void resetDragToCreateState() {
+		sourceEditPart = null;
+		sourceModel = null;
+		canvasDropLocation = null;
+		ctrlPressed = false;
+		dragStartLocation = null;
+		hasExceededMinDistance = false;
+		hideGhostBlock(); // Clean up ghost
+	}
+
+	/**
+	 * Show ghost block at cursor position to indicate new element will be created.
+	 */
+
+	/**
+	 * Show ghost block at cursor position to indicate new element will be created.
+	 */
+
+	private void showGhostBlock(final Point location) {
+		if (ghostBlockFigure == null) {
+			// Create font once
+			if (ghostLabelFont == null) {
+				ghostLabelFont = new Font(Display.getDefault(), "Arial", 24, SWT.BOLD);
+			}
+
+			// Create rectangle figure
+			final RectangleFigure rect = new RectangleFigure();
+			rect.setFill(true);
+			rect.setBackgroundColor(ColorConstants.lightGray);
+			rect.setForegroundColor(ColorConstants.darkGray);
+			rect.setAlpha(100);
+			rect.setLineWidth(2);
+			rect.setLineStyle(SWT.LINE_DASH);
+
+			// Add "?" label
+			final Label label = new Label("?");
+			label.setFont(ghostLabelFont);
+			label.setForegroundColor(ColorConstants.black);
+			rect.add(label);
+
+			// Position label in center using BOUNDS
+			final Dimension labelSize = label.getPreferredSize();
+			label.setBounds(new Rectangle(70 - labelSize.width / 2, 45 - labelSize.height / 2, labelSize.width,
+					labelSize.height));
+
+			ghostBlockFigure = rect;
+
+			try {
+				final EditPartViewer viewer = getCurrentViewer();
+				if (viewer instanceof final GraphicalViewer gv) {
+					final ScalableFreeformRootEditPart root = (ScalableFreeformRootEditPart) gv.getRootEditPart();
+					final IFigure feedbackLayer = root.getLayer(LayerConstants.FEEDBACK_LAYER);
+
+					final Point feedbackLocation = location.getCopy();
+					feedbackLayer.translateToRelative(feedbackLocation);
+					feedbackLayer.translateFromParent(feedbackLocation);
+
+					rect.setBounds(new Rectangle(feedbackLocation.x - 70, feedbackLocation.y - 45, 140, 90));
+
+					feedbackLayer.add(ghostBlockFigure);
+				}
+			} catch (final Exception e) {
+				System.out.println("Failed to add ghost: " + e.getMessage());
+				e.printStackTrace();
+			}
+		} else {
+			// Update position
+			try {
+				final EditPartViewer viewer = getCurrentViewer();
+				if (viewer instanceof final GraphicalViewer gv) {
+					final ScalableFreeformRootEditPart root = (ScalableFreeformRootEditPart) gv.getRootEditPart();
+					final IFigure feedbackLayer = root.getLayer(LayerConstants.FEEDBACK_LAYER);
+
+					final Point feedbackLocation = location.getCopy();
+					feedbackLayer.translateToRelative(feedbackLocation);
+					feedbackLayer.translateFromParent(feedbackLocation);
+
+					ghostBlockFigure.setLocation(new Point(feedbackLocation.x - 70, feedbackLocation.y - 45));
+				}
+			} catch (final Exception e) {
+				// Ignore
+			}
+		}
+	}
+
+	private void hideGhostBlock() {
+		if (ghostBlockFigure != null) {
+			System.out.println("Removing ghost block");
+
+			try {
+				final EditPartViewer viewer = getCurrentViewer();
+				if (viewer instanceof final GraphicalViewer gv) {
+					final ScalableFreeformRootEditPart root = (ScalableFreeformRootEditPart) gv.getRootEditPart();
+					final IFigure feedbackLayer = root.getLayer(LayerConstants.FEEDBACK_LAYER);
+					feedbackLayer.remove(ghostBlockFigure);
+				}
+			} catch (final Exception e) {
+				System.out.println("Failed to remove ghost: " + e.getMessage());
+			}
+
+			ghostBlockFigure = null;
+		}
+
+		// Dispose font when cleaning up
+		if (ghostLabelFont != null && !ghostLabelFont.isDisposed()) {
+			ghostLabelFont.dispose();
+			ghostLabelFont = null;
+		}
+	}
+	// ============================================================================
+	// MODIFIED: Cursor Calculation for Visual Feedback
 	// ============================================================================
 
 	/**
@@ -232,60 +428,21 @@ public class FordiacConnectionDragCreationTool extends ConnectionDragCreationToo
 	 * state. This is called by GEF's drag tracker and properly updates the cursor
 	 * during drag operations.
 	 *
-	 * NOTE: During active drag operations, setCursor() doesn't work because the
-	 * drag tracker continuously calls calculateCursor() to determine the cursor. We
-	 * must override this method instead.
+	 * MODIFIED: Now checks for Ctrl+Drag conditions before showing special cursor.
 	 *
-	 * * Cursor Mapping: - HAND: Over empty canvas (create new element mode) -
-	 * CROSS: Over compatible port (connect mode - existing FORDIAC behavior) - NO:
+	 * Cursor Mapping: - PLUS_CURSOR (HAND): Ctrl+Drag over empty canvas (create new
+	 * element mode) - CROSS: Normal drag over compatible port (connect mode) - NO:
 	 * Over invalid target (helpful feedback)
 	 */
 	@Override
 	protected Cursor calculateCursor() {
-		// If dragging from source pin (drag-to-create mode active)
-		if (sourceEditPart != null && sourceModel instanceof IInterfaceElement) {
-			final Point location = getLocation();
-			final EditPart targetEditPart = getCurrentViewer().findObjectAt(location);
-
-			if (isOverEmptyCanvas(targetEditPart)) {
-				// Over empty canvas - show HAND to indicate "create new element"
-				// This distinguishes from CROSS (which users know means "connect to port")
-				return Cursors.HAND;
-			}
-			// Over an element - let parent handle it
-			// Parent will show CROSS over valid ports, normal cursor elsewhere
-			return super.calculateCursor();
+		// Check if we're in drag-to-create mode FIRST (before parent validation)
+		if (ctrlPressed && hasExceededMinDistance && canvasDropLocation != null) {
+			return PLUS_CURSOR;
 		}
 
-		// Not in drag-to-create mode - use normal behavior
+		// Otherwise use parent's cursor logic
 		return super.calculateCursor();
-	}
-
-	/**
-	 * Update cursor to provide visual feedback during drag-to-create mode. Shows
-	 * crosshair when over empty canvas, normal arrow otherwise.
-	 */
-	private void updateCursorFeedback() {
-		final Point location = getLocation();
-		final EditPart targetEditPart = getCurrentViewer().findObjectAt(location);
-
-		// Check if we're over empty canvas (the root network edit part)
-		final boolean nowOverEmptyCanvas = isOverEmptyCanvas(targetEditPart);
-
-		// Only update cursor if state changed (avoid unnecessary redraws)
-		if (nowOverEmptyCanvas != isOverEmptyCanvas) {
-			isOverEmptyCanvas = nowOverEmptyCanvas;
-
-			if (isOverEmptyCanvas) {
-				// Over empty canvas - show crosshair to indicate "create new element" mode
-				setCursor(Cursors.CROSS);
-				System.out.println("Cursor: CROSS (over empty canvas)");
-			} else {
-				// Over an element - show default arrow
-				setCursor(Cursors.ARROW);
-				System.out.println("Cursor: ARROW (over element)");
-			}
-		}
 	}
 
 	/**
@@ -301,6 +458,10 @@ public class FordiacConnectionDragCreationTool extends ConnectionDragCreationToo
 		final Object model = targetEditPart.getModel();
 		return model instanceof FBNetwork;
 	}
+
+	// ============================================================================
+	// Connection Request Helpers
+	// ============================================================================
 
 	/**
 	 * Capture the source edit part from the connection request. This is called
@@ -346,6 +507,10 @@ public class FordiacConnectionDragCreationTool extends ConnectionDragCreationToo
 		super.setCurrentCommand(c);
 	}
 
+	// ============================================================================
+	// Canvas Drop Detection (Unused but kept for reference)
+	// ============================================================================
+
 	/**
 	 * Check if the connection was dropped on empty canvas (not on a valid port).
 	 * This indicates a drag-to-create scenario.
@@ -370,6 +535,10 @@ public class FordiacConnectionDragCreationTool extends ConnectionDragCreationToo
 		}
 		return target.getModel() instanceof IInterfaceElement;
 	}
+
+	// ============================================================================
+	// Drag-to-Create Workflow
+	// ============================================================================
 
 	/**
 	 * Handle dropping a connection on empty canvas to trigger drag-to-create.
@@ -408,16 +577,18 @@ public class FordiacConnectionDragCreationTool extends ConnectionDragCreationToo
 
 		final FBNetwork network = (FBNetwork) graphicalEditPart.getModel();
 
-		// Store state in manager (survives tool deactivation during type selection)
+		// Store state in manager
 		PendingConnectionManager.getInstance().setPending((IInterfaceElement) sourceModel, network);
 
-		// Start polling for new FB creation
-		setupPendingConnectionListener(viewer);
+		final Point finalDropLocation = dropLocation.getCopy();
 
-		// Trigger FORDIAC's type selection UI (which will create the FB)
+		// Show dialog IMMEDIATELY without any delay
 		if (graphicalEditPart instanceof GraphicalEditPart) {
-			showTypeSelectionUI((GraphicalEditPart) graphicalEditPart);
+			showTypeSelectionUI((GraphicalEditPart) graphicalEditPart, finalDropLocation);
 		}
+
+		// Set up listener AFTER dialog is triggered (no initial delay)
+		setupPendingConnectionListener(viewer);
 	}
 
 	/**
@@ -436,17 +607,15 @@ public class FordiacConnectionDragCreationTool extends ConnectionDragCreationToo
 			return;
 		}
 
-		// Store the current number of elements before creation
 		final int elementCountBefore = manager.getTargetNetwork().getNetworkElements().size();
 
-		// Wait 200ms before starting to poll (let dialog appear first)
-		Display.getDefault().timerExec(200, new Runnable() {
+		// Poll immediately, no delays
+		Display.getDefault().asyncExec(new Runnable() {
 			private int attempts = 0;
-			private static final int MAX_ATTEMPTS = 50; // 50 * 100ms = 5 seconds max
+			private static final int MAX_ATTEMPTS = 200;
 
 			@Override
 			public void run() {
-				// Check if state is still valid (user might have cancelled)
 				if (!manager.hasPending()) {
 					return;
 				}
@@ -456,13 +625,10 @@ public class FordiacConnectionDragCreationTool extends ConnectionDragCreationToo
 				final int elementCountAfter = manager.getTargetNetwork().getNetworkElements().size();
 
 				if (elementCountAfter > elementCountBefore) {
-					// New FB was created - create the connection
 					createPendingConnection(viewer);
 				} else if (attempts < MAX_ATTEMPTS) {
-					// Not created yet, check again
-					Display.getDefault().timerExec(100, this);
+					Display.getDefault().timerExec(20, this); // Fast polling
 				} else {
-					// Timeout - user probably cancelled
 					manager.clear();
 				}
 			}
@@ -557,12 +723,16 @@ public class FordiacConnectionDragCreationTool extends ConnectionDragCreationToo
 		manager.clear();
 	}
 
+	// ============================================================================
+	// Port Compatibility Checking
+	// ============================================================================
+
 	private IInterfaceElement findCompatibleInputPin(final FBNetworkElement fb, final IInterfaceElement outputPin) {
 		if (fb == null || outputPin == null) {
 			return null;
 		}
 
-// FBNetworkElement doesn't have getInterface() - need to check type
+		// FBNetworkElement doesn't have getInterface() - need to check type
 		if (!(fb instanceof final FB functionBlock)) {
 			return null; // Only FBs have interfaces we can query
 		}
@@ -572,14 +742,14 @@ public class FordiacConnectionDragCreationTool extends ConnectionDragCreationToo
 			return null;
 		}
 
-// Check if output is event or data
+		// Check if output is event or data
 		if (outputPin instanceof Event) {
-// Find first event input
+			// Find first event input
 			final EList<Event> eventInputs = interfaceList.getEventInputs();
 			return eventInputs.isEmpty() ? null : eventInputs.get(0);
 		}
 		if (outputPin instanceof final VarDeclaration outputVar) {
-// Find compatible data input
+			// Find compatible data input
 			for (final VarDeclaration inputVar : interfaceList.getInputVars()) {
 				if (isDataTypeCompatible(outputVar, inputVar)) {
 					return inputVar;
@@ -626,57 +796,6 @@ public class FordiacConnectionDragCreationTool extends ConnectionDragCreationToo
 		}
 
 		return cmd;
-	}
-
-	private TypeLibrary getTypeLibraryFromEditPart(final GraphicalEditPart editPart) {
-		final Object model = editPart.getModel();
-		if (model instanceof final FBNetwork network) {
-			final AutomationSystem automationSystem = network.getAutomationSystem();
-			if (automationSystem != null) {
-				return automationSystem.getTypeLibrary();
-			}
-			final Application application = network.getApplication();
-			if (application != null && application.getAutomationSystem() != null) {
-				return application.getAutomationSystem().getTypeLibrary();
-			}
-		}
-		return null;
-	}
-
-	private void showTypeSelectionUI(final GraphicalEditPart editPart) {
-		// This is tricky - NewInstanceDirectEditManager is in application plugin
-		// We need to trigger it via the existing EditPolicy mechanism
-
-		// Try to get the policy by role
-		final Object policy = editPart.getEditPolicy(EditPolicy.DIRECT_EDIT_ROLE);
-
-		if (policy != null) {
-			try {
-				// Use reflection to call performDirectEdit
-				final java.lang.reflect.Method method = policy.getClass().getMethod("performDirectEdit",
-						org.eclipse.gef.requests.SelectionRequest.class);
-
-				final SelectionRequest request = new SelectionRequest();
-				request.setLocation(canvasDropLocation.getCopy());
-
-				method.invoke(policy, request);
-				System.out.println("Triggered FORDIAC type selection");
-
-			} catch (final Exception e) {
-				System.out.println("ERROR: Could not trigger direct edit: " + e.getMessage());
-				e.printStackTrace();
-			}
-		} else {
-			System.out.println("ERROR: No DIRECT_EDIT_ROLE policy found");
-		}
-	}
-
-	private static void startHover() {
-		UIPlugin.getDefault().getEMH().setHover(true);
-	}
-
-	private static void stopHover() {
-		UIPlugin.getDefault().getEMH().setHover(false);
 	}
 
 	/**
@@ -735,6 +854,53 @@ public class FordiacConnectionDragCreationTool extends ConnectionDragCreationToo
 		return compatible;
 	}
 
+	// ============================================================================
+	// UI Helpers
+	// ============================================================================
+
+	private TypeLibrary getTypeLibraryFromEditPart(final GraphicalEditPart editPart) {
+		final Object model = editPart.getModel();
+		if (model instanceof final FBNetwork network) {
+			final AutomationSystem automationSystem = network.getAutomationSystem();
+			if (automationSystem != null) {
+				return automationSystem.getTypeLibrary();
+			}
+			final Application application = network.getApplication();
+			if (application != null && application.getAutomationSystem() != null) {
+				return application.getAutomationSystem().getTypeLibrary();
+			}
+		}
+		return null;
+	}
+
+	private void showTypeSelectionUI(final GraphicalEditPart editPart, final Point dropLocation) {
+		// This is tricky - NewInstanceDirectEditManager is in application plugin
+		// We need to trigger it via the existing EditPolicy mechanism
+
+		// Try to get the policy by role
+		final Object policy = editPart.getEditPolicy(EditPolicy.DIRECT_EDIT_ROLE);
+
+		if (policy != null) {
+			try {
+				// Use reflection to call performDirectEdit
+				final java.lang.reflect.Method method = policy.getClass().getMethod("performDirectEdit",
+						org.eclipse.gef.requests.SelectionRequest.class);
+
+				final SelectionRequest request = new SelectionRequest();
+				request.setLocation(dropLocation.getCopy()); // Use parameter instead of field
+
+				method.invoke(policy, request);
+				System.out.println("Triggered FORDIAC type selection");
+
+			} catch (final Exception e) {
+				System.out.println("ERROR: Could not trigger direct edit: " + e.getMessage());
+				e.printStackTrace();
+			}
+		} else {
+			System.out.println("ERROR: No DIRECT_EDIT_ROLE policy found");
+		}
+	}
+
 	/**
 	 * Show a dialog to let the user select which port to connect to when multiple
 	 * compatible ports are available.
@@ -755,6 +921,14 @@ public class FordiacConnectionDragCreationTool extends ConnectionDragCreationToo
 		}
 
 		return null; // User cancelled
+	}
+
+	private static void startHover() {
+		UIPlugin.getDefault().getEMH().setHover(true);
+	}
+
+	private static void stopHover() {
+		UIPlugin.getDefault().getEMH().setHover(false);
 	}
 
 }
